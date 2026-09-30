@@ -87,6 +87,8 @@ endfunction()
 # Unit tests
 add_paulascape_test(mod_loader_test src/mod_loader_test_main.cpp)
 add_paulascape_test(paula_voice_test src/paula_voice_test_main.cpp)
+add_paulascape_test(paula_reference_test src/paula_reference_test_main.cpp)
+target_compile_definitions(paula_reference_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(voice_pool_test src/voice_pool_test_main.cpp)
 add_paulascape_test(replayer_test src/replayer_test_main.cpp)
 target_compile_definitions(replayer_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")

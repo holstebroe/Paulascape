@@ -499,7 +499,7 @@ void VoicePool::processAudio(float** outputs, uint32_t numChannels, uint32_t num
 
         std::array<float, 4> chSamples{0.0f, 0.0f, 0.0f, 0.0f};
         for (auto& slot : voices) {
-            if (!slot.voice.isActive()) continue;
+            if (!slot.voice.hasOutput()) continue;
             float s = slot.voice.renderSample();
             if (slot.releasing) {
                 slot.fadeGain -= fadeStep;

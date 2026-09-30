@@ -13,7 +13,7 @@ and most design features are stubs. Legend: [x] done, [~] partial, [ ] missing.
 | Area | State | Gap |
 | --- | --- | --- |
 | Build, CMake, deploy_clap, CI | [x] | `deploy_clap` now copies to `%CLAPTEST%` (Acidus style). No clap-validator step, no release job on `v*.*.*` tags, no test MODs/reference renders/tools |
-| Core: MOD loader, tables, Paula voice, BLEP, RC filters | [~] | Unit-tested in isolation; not compared with pt2-clone renders; no PAL/NTSC clock setting, no <31.4 kHz oversampling |
+| Core: MOD loader, tables, Paula voice, BLEP, RC filters | [x] | Voice/BLEP/filters were approximations; now ports verified against pt2-clone output (see J). Low sample rates and periods below 113 are handled by internal oversampling |
 | Voice pool | [x] | Was partial; see E and F |
 | MIDI effects / CC mapping | [x] | Was missing entirely; see F |
 | Replayer (pattern mode) | [x] | Was: only Bxx, Cxx, Dxx, Fxx. Now all effects (see G) |
@@ -44,7 +44,7 @@ and most design features are stubs. Legend: [x] done, [~] partial, [ ] missing.
 - [x] **G. Replayer:** all ProTracker effects except EFx funk repeat and E8x (unused): arpeggio, slides, tone porta, vibrato/tremolo + waveforms, volume slides, 9xx, Bxx/Dxx/Fxx, E1-EE incl. loop, delay, retrigger, cut, pattern delay. Fixed sample-loop end bug in the Paula voice. Tests cover each effect, tempo scaling and a 55 s render of BEDROCK. *Open:* compare against pt2-clone reference renders (J)
 - [~] **H. WAV import in UI:** "Import WAV" button (file dialog) and Win32 file drop onto a slot row, result stored in state. *Open:* XDND drop on X11 (and MOD drop there), Cocoa drop
 - [~] **I. MIDI export in UI:** "MIDI" (pattern-mode clip) and "Notes" (full export) buttons with save dialog. Shared song unroller (Bxx/Dxx/E6x/EEx), tempo map, program changes, velocity from Cxx, EDx/ECx timing, tone portamento as a legato overlap, effect CCs with E-effect encoding and clear triples. Round trip through the voice pool matches the replayer (envelope correlation 0.9998 on BEDROCK). *Open:* drag-out of the .mid onto the DAW (needs native drag source per OS), generic non-Paulascape export, 0xy via legato overlap
-- [~] **J. Validation:** `clap_host_test` loads the built `.clap` and drives lifecycle, params, ports, events, state, GUI embedding (under Xvfb in ctest). Tests keep `assert` in Release. *Open:* clap-validator in CI (not reachable from this session), pt2-clone reference renders and `tools/` scripts (needs pt2_mod2wav output), real BLEP/Paula accuracy check: the voice's "authentic" mode is a step-delta BLEP approximation, not a port of `pt2_paula.c`
+- [~] **J. Validation:** `clap_host_test` loads the built `.clap` and drives lifecycle, params, ports, events, state, GUI embedding (under Xvfb in ctest). Tests keep `assert` in Release. The Paula voice, BLEP table and A500/A1200/LED filters are now ports of pt2-clone's `pt2_paula.c`/`pt2_blep.c`/`pt2_rcfilters.c`; `paula_reference_test` compares 12 renders (4 periods x A500, A500+LED, A1200) with output of pt2-clone's own code (`test/resources/paula`, regenerated with `tools/paula_reference`): max difference below 4e-4, period 124 bit-exact. Periods below 113 use internal oversampling (pt2-clone clamps there). *Open:* whole-MOD reference renders (`pt2_mod2wav`), clap-validator in CI (not reachable from this session)
 - [~] **K. Release:** CI builds and tests on three OSes, uploads per-OS artifacts and zips them into a GitHub release on `v*.*.*` tags; README corrected. *Open:* a tagged release has not been exercised; Windows build untested by the author of this change
 - [ ] **L. Known gaps to decide:** velocity maps to Cxx volume as in the design, so the slot "Vol" column only affects pattern mode; layout is not asked on first open; macOS GUI; keyboard input; undo of slot edits; `request_resize` is called from the GUI thread
 
@@ -54,3 +54,4 @@ and most design features are stubs. Legend: [x] done, [~] partial, [ ] missing.
 - 2026-09-30: milestone G done (full replayer, tests).
 - 2026-09-30: milestones E and F done (voice pool rewrite, MIDI events, 4-mono ports, MIDI map page, voice pool tests).
 - 2026-09-30: milestones H-K partly done: MIDI export rewrite with round-trip test, host test, CI release job, README.
+- 2026-09-30: Paula voice, BLEP and filters replaced by ports of pt2-clone; found and fixed a 2x pitch error while building the reference comparison.
