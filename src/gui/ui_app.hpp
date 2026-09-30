@@ -30,7 +30,7 @@ public:
     std::function<void(int)> onScaleChanged;
 
 private:
-    enum class Screen { Front, Settings };
+    enum class Screen { Front, Settings, MidiMap };
 
     struct Hit {
         int x, y, w, h;
@@ -49,6 +49,7 @@ private:
 
     void drawFront(Framebuffer& fb);
     void drawSettings(Framebuffer& fb);
+    void drawMidiMap(Framebuffer& fb);
     void drawSampleMatrix(Framebuffer& fb);
     void drawPatternList(Framebuffer& fb);
 

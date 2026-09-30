@@ -1,6 +1,7 @@
 #include "paulascape_plugin.hpp"
 #include "gui/gui_window.hpp"
 #include "gui/ui_app.hpp"
+#include <cstdio>
 #include <memory>
 #include <clap/clap.h>
 #include <cstring>
@@ -188,19 +189,25 @@ static const clap_plugin_state_t s_state_extension = {
     .load = clap_state_load,
 };
 
-// Audio ports extension
+// Audio ports extension: one stereo port, or four mono ports (Amiga channel n on port n)
+static paulascape::PaulascapePlugin* core(const clap_plugin_t* plugin) {
+    return static_cast<paulascape::PaulascapePlugin*>(plugin->plugin_data);
+}
+
 static uint32_t clap_audio_ports_count(const clap_plugin_t* plugin, bool is_input) {
-    return is_input ? 0 : 1;
+    return is_input ? 0 : core(plugin)->outputPortCount();
 }
 
 static bool clap_audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bool is_input, clap_audio_port_info_t* info) {
-    if (is_input || index != 0 || !info) return false;
+    if (is_input || !info || index >= core(plugin)->outputPortCount()) return false;
+    const bool mono = core(plugin)->fourMonoLayout();
     std::memset(info, 0, sizeof(*info));
-    info->id = 0;
-    std::strncpy(info->name, "Main Output", sizeof(info->name));
-    info->flags = CLAP_AUDIO_PORT_IS_MAIN;
-    info->channel_count = 2;
-    info->port_type = CLAP_PORT_STEREO;
+    info->id = index;
+    if (mono) std::snprintf(info->name, sizeof(info->name), "Channel %u", index + 1);
+    else std::snprintf(info->name, sizeof(info->name), "Main Output");
+    info->flags = index == 0 ? CLAP_AUDIO_PORT_IS_MAIN : 0;
+    info->channel_count = mono ? 1 : 2;
+    info->port_type = mono ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
     info->in_place_pair = CLAP_INVALID_ID;
     return true;
 }
@@ -208,6 +215,41 @@ static bool clap_audio_ports_get(const clap_plugin_t* plugin, uint32_t index, bo
 static const clap_plugin_audio_ports_t s_audio_ports_extension = {
     .count = clap_audio_ports_count,
     .get = clap_audio_ports_get,
+};
+
+// Audio ports config: the two output layouts
+static uint32_t clap_ports_config_count(const clap_plugin_t*) { return 2; }
+
+static bool clap_ports_config_get(const clap_plugin_t*, uint32_t index, clap_audio_ports_config_t* config) {
+    if (index > 1 || !config) return false;
+    std::memset(config, 0, sizeof(*config));
+    config->id = index;
+    if (index == 0) {
+        std::snprintf(config->name, sizeof(config->name), "Stereo");
+        config->output_port_count = 1;
+        config->has_main_output = true;
+        config->main_output_channel_count = 2;
+        config->main_output_port_type = CLAP_PORT_STEREO;
+    } else {
+        std::snprintf(config->name, sizeof(config->name), "4 x mono");
+        config->output_port_count = 4;
+        config->has_main_output = true;
+        config->main_output_channel_count = 1;
+        config->main_output_port_type = CLAP_PORT_MONO;
+    }
+    return true;
+}
+
+static bool clap_ports_config_select(const clap_plugin_t* plugin, clap_id config_id) {
+    if (config_id > 1) return false;
+    core(plugin)->setOutputLayoutFromHost(config_id == 1);
+    return true;
+}
+
+static const clap_plugin_audio_ports_config_t s_audio_ports_config_extension = {
+    .count = clap_ports_config_count,
+    .get = clap_ports_config_get,
+    .select = clap_ports_config_select,
 };
 
 // Note ports extension
@@ -277,6 +319,7 @@ static const void* clap_plugin_get_extension(const struct clap_plugin* plugin, c
     if (std::strcmp(id, CLAP_EXT_PARAMS) == 0) return &s_params_extension;
     if (std::strcmp(id, CLAP_EXT_STATE) == 0) return &s_state_extension;
     if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports_extension;
+    if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0) return &s_audio_ports_config_extension;
     if (std::strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &s_note_ports_extension;
     if (std::strcmp(id, CLAP_EXT_GUI) == 0 && paulascape::GuiWindow::isSupported()) return &s_gui_extension;
     return nullptr;

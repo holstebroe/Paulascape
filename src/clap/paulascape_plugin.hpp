@@ -26,6 +26,7 @@ enum ParamId : clap_id {
     PARAM_ROWS_PER_BEAT,
     PARAM_PATTERN_BASE_NOTE,
     PARAM_SONG_ORDER_KEY,
+    PARAM_CLOCK,
     PARAM_COUNT
 };
 
@@ -106,6 +107,17 @@ public:
     bool exportMidi(const std::string& path, int patternIndex);
     const ScopeTap& scopeTap() const { return scope; }
 
+    // MIDI CC mapping (settings screen). Index order matches midiMapEntryName().
+    static constexpr size_t MIDI_MAP_ENTRIES = 11;
+    static const char* midiMapEntryName(size_t index);
+    MidiMap getMidiMap();
+    void adjustMidiMap(size_t index, int delta);
+
+    // Output layout as seen by the audio ports extension
+    bool fourMonoLayout();
+    void setOutputLayoutFromHost(bool fourMono);
+    uint32_t outputPortCount();
+
     static const char* paramName(clap_id id);
     static double paramMin(clap_id id);
     static double paramMax(clap_id id);
@@ -142,6 +154,10 @@ private:
     void stopAllAudio();                             // caller holds stateMutex
     void replaceModule(Module&& mod);
     void requestHostFlush();
+    void requestPortRescan();
+    void handleMidi(const uint8_t* data);
+    void applyFilters();                             // caller holds stateMutex
+    MidiMap midiMap;
 };
 
 } // namespace paulascape

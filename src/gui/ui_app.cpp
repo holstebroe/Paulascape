@@ -28,7 +28,7 @@ const char* NOTE_NAMES[12] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G
 
 std::string noteName(int key) {
     key = std::clamp(key, 0, 127);
-    return std::string(NOTE_NAMES[key % 12]) + std::to_string(key / 12 - 1);
+    return std::string(NOTE_NAMES[key % 12]) + std::to_string(key / 12 - 2);
 }
 
 std::string padRight(std::string s, size_t n) {
@@ -134,7 +134,9 @@ void UiApp::render(Framebuffer& fb) {
     hits.clear();
     clampScroll();
     if (fb.getWidth() != WIDTH || fb.getHeight() != HEIGHT) fb.resize(WIDTH, HEIGHT);
-    if (screen == Screen::Front) drawFront(fb); else drawSettings(fb);
+    if (screen == Screen::Front) drawFront(fb);
+    else if (screen == Screen::Settings) drawSettings(fb);
+    else drawMidiMap(fb);
 }
 
 void UiApp::drawFront(Framebuffer& fb) {
@@ -291,6 +293,7 @@ void UiApp::drawSettings(Framebuffer& fb) {
     fb.clear(COL_BG);
     button(fb, 4, 4, 72, 18, "< Back", false, [this](int, bool) { screen = Screen::Front; });
     text(fb, 96, 9, "Paulascape settings", COL_TEXT);
+    button(fb, 480, 4, 152, 18, "MIDI mapping >", false, [this](int, bool) { screen = Screen::MidiMap; });
 
     struct Row { const char* label; clap_id id; const char* note; };
     const Row rows[] = {
@@ -301,6 +304,7 @@ void UiApp::drawSettings(Framebuffer& fb) {
         {"Stereo separation", PARAM_STEREO_SEPARATION, ""},
         {"Pitch", PARAM_PITCH_MODE, "Free lets pitch bend glide"},
         {"Tempo", PARAM_TEMPO_MODE, ""},
+        {"Clock", PARAM_CLOCK, "changes pitch and timing slightly"},
         {"Rows per beat", PARAM_ROWS_PER_BEAT, ""},
         {"Pattern base note", PARAM_PATTERN_BASE_NOTE, "first pattern key"},
         {"Song-order key", PARAM_SONG_ORDER_KEY, "plays the whole song"},
@@ -330,6 +334,25 @@ void UiApp::drawSettings(Framebuffer& fb) {
         setScale(s);
         if (onScaleChanged) onScaleChanged(uiScale);
     });
+}
+
+void UiApp::drawMidiMap(Framebuffer& fb) {
+    fb.clear(COL_BG);
+    button(fb, 4, 4, 72, 18, "< Back", false, [this](int, bool) { screen = Screen::Settings; });
+    text(fb, 96, 9, "MIDI CC mapping (L-click +1, R-click -1, Shift 10)", COL_TEXT);
+    const MidiMap map = plugin.getMidiMap();
+    const uint8_t values[PaulascapePlugin::MIDI_MAP_ENTRIES] = {map.modWheel, map.glide, map.legato, map.vibratoSpeed,
+        map.sampleOffset, map.retrigger, map.noteCut, map.ledFilter, map.fxNumber, map.fxHigh, map.fxLow};
+    int y = 32;
+    for (size_t i = 0; i < PaulascapePlugin::MIDI_MAP_ENTRIES; ++i) {
+        bevel(fb, 8, y, fb.getWidth() - 16, 24, false, COL_PANEL);
+        text(fb, 16, y + 8, PaulascapePlugin::midiMapEntryName(i), COL_TEXT);
+        bevel(fb, 300, y + 3, 96, 18, true, COL_LCD_BG);
+        text(fb, 308, y + 8, "CC " + padLeft(std::to_string(values[i]), 3), COL_LCD_TEXT);
+        addHit(300, y + 3, 96, 18, [this, i](int b, bool sh) { plugin.adjustMidiMap(i, (b == 3 ? -1 : 1) * (sh ? 10 : 1)); },
+               [this, i](int d) { plugin.adjustMidiMap(i, d); });
+        y += 28;
+    }
 }
 
 void UiApp::onMouseDown(int x, int y, int button, bool shift) {

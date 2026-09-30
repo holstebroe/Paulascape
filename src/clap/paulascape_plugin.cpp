@@ -14,7 +14,7 @@ namespace paulascape {
 namespace {
 
 constexpr uint32_t STATE_MAGIC = 0x41545350; // "PSTA"
-constexpr uint32_t STATE_VERSION = 1;
+constexpr uint32_t STATE_VERSION = 2;
 constexpr uint32_t SCOPE_DECIMATION = 8;
 
 struct ParamDesc {
@@ -36,12 +36,13 @@ const ParamDesc PARAM_DESCS[PARAM_COUNT] = {
     {"Rows Per Beat", 0, 1, 0, true}, // 0 = 4, 1 = 8
     {"Pattern Base Note", 0, 127, 24, true},
     {"Song Order Key", 0, 127, 12, true},
+    {"Clock", 0, 1, 0, true},
 };
 
 const char* NOTE_NAMES[12] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"};
 
 std::string noteName(int key) {
-    return std::string(NOTE_NAMES[key % 12]) + std::to_string(key / 12 - 1);
+    return std::string(NOTE_NAMES[key % 12]) + std::to_string(key / 12 - 2);
 }
 
 const char* enumText(clap_id id, int v) {
@@ -55,8 +56,20 @@ const char* enumText(clap_id id, int v) {
         case PARAM_PITCH_MODE: return v ? "Free" : "Period table";
         case PARAM_TEMPO_MODE: return v ? "MOD native" : "Follow host";
         case PARAM_ROWS_PER_BEAT: return v ? "8" : "4";
+        case PARAM_CLOCK: return v ? "NTSC" : "PAL";
         default: return nullptr;
     }
+}
+
+std::array<uint8_t, 11> midiMapBytes(const MidiMap& m) {
+    return {m.modWheel, m.glide, m.legato, m.vibratoSpeed, m.sampleOffset, m.retrigger,
+            m.noteCut, m.ledFilter, m.fxNumber, m.fxHigh, m.fxLow};
+}
+
+void midiMapFromBytes(MidiMap& m, const uint8_t* b) {
+    uint8_t* fields[11] = {&m.modWheel, &m.glide, &m.legato, &m.vibratoSpeed, &m.sampleOffset, &m.retrigger,
+                           &m.noteCut, &m.ledFilter, &m.fxNumber, &m.fxHigh, &m.fxLow};
+    for (size_t i = 0; i < 11; ++i) *fields[i] = std::min<uint8_t>(b[i], 127);
 }
 
 } // namespace
@@ -130,14 +143,16 @@ void PaulascapePlugin::applyParam(clap_id id, double value) {
             const auto mode = v ? ResamplerMode::Clean : ResamplerMode::Authentic;
             voicePool.setResamplerMode(mode);
             replayer.setResamplerMode(mode);
+            applyFilters();
             break;
         }
-        case PARAM_FILTER_MODEL: {
-            const auto model = static_cast<FilterModel>(v);
-            voicePool.setFilterModel(model);
-            replayer.setFilterModel(model);
+        case PARAM_FILTER_MODEL:
+            applyFilters();
             break;
-        }
+        case PARAM_CLOCK:
+            voicePool.setNTSC(v != 0);
+            replayer.setNTSC(v != 0);
+            break;
         case PARAM_LED_FILTER:
             voicePool.setLedFilter(v != 0);
             replayer.setLedFilter(v != 0);
@@ -168,7 +183,16 @@ void PaulascapePlugin::applyParam(clap_id id, double value) {
     if (modeChanged) stopAllAudio();
 }
 
+void PaulascapePlugin::applyFilters() {
+    // Clean mode also skips the Amiga filters
+    const auto model = params[PARAM_RESAMPLER_MODE] >= 0.5 ? FilterModel::Off
+                                                           : static_cast<FilterModel>(static_cast<int>(params[PARAM_FILTER_MODEL]));
+    voicePool.setFilterModel(model);
+    replayer.setFilterModel(model);
+}
+
 void PaulascapePlugin::applyAllParams() {
+    voicePool.setMidiMap(midiMap);
     voicePool.setSelectedSlot(selectedSlot);
     for (clap_id i = 0; i < PARAM_COUNT; ++i) applyParam(i, params[i]);
 }
@@ -204,6 +228,10 @@ void PaulascapePlugin::handleEvent(const clap_event_header_t* header) {
             handleNoteOff(static_cast<uint8_t>(std::max<int16_t>(ev->channel, 0)), static_cast<uint8_t>(ev->key));
             break;
         }
+        case CLAP_EVENT_MIDI: {
+            handleMidi(reinterpret_cast<const clap_event_midi_t*>(header)->data);
+            break;
+        }
         case CLAP_EVENT_PARAM_VALUE: {
             const auto* ev = reinterpret_cast<const clap_event_param_value_t*>(header);
             applyParam(ev->param_id, ev->value);
@@ -211,6 +239,29 @@ void PaulascapePlugin::handleEvent(const clap_event_header_t* header) {
         }
         default:
             break;
+    }
+}
+
+void PaulascapePlugin::handleMidi(const uint8_t* d) {
+    const uint8_t status = d[0] & 0xF0;
+    const uint8_t ch = d[0] & 0x0F;
+    switch (status) {
+        case 0x80: handleNoteOff(ch, d[1]); break;
+        case 0x90:
+            if (d[2] == 0) handleNoteOff(ch, d[1]); else handleNoteOn(ch, d[1], d[2]);
+            break;
+        case 0xB0:
+            if (d[1] == midiMap.ledFilter) {
+                applyParam(PARAM_LED_FILTER, d[2] >= 64 ? 1.0 : 0.0);
+            } else if (d[1] == 120 || d[1] == 123) {
+                stopAllAudio();
+            } else {
+                voicePool.controlChange(ch, d[1], d[2]);
+            }
+            break;
+        case 0xD0: voicePool.channelPressure(ch, d[1]); break;
+        case 0xE0: voicePool.setPitchBendValue(ch, d[1] | (d[2] << 7)); break;
+        default: break;
     }
 }
 
@@ -266,15 +317,26 @@ clap_process_status PaulascapePlugin::process(const clap_process_t* proc) {
 
     if (proc->transport && (proc->transport->flags & CLAP_TRANSPORT_HAS_TEMPO)) {
         replayer.setHostTempo(proc->transport->tempo);
+        voicePool.setHostTempo(proc->transport->tempo);
     }
 
+    float* portPtrs[8] = {};
     float** out = nullptr;
     uint32_t numCh = 0;
     const uint32_t numFrames = proc->frames_count;
     if (proc->audio_outputs_count > 0 && proc->audio_outputs[0].data32) {
-        out = proc->audio_outputs[0].data32;
-        numCh = proc->audio_outputs[0].channel_count;
-        for (uint32_t c = 0; c < numCh; ++c) std::memset(out[c], 0, numFrames * sizeof(float));
+        if (params[PARAM_OUTPUT_LAYOUT] >= 0.5 && proc->audio_outputs_count >= 4) {
+            // 4 x mono: one single-channel port per Amiga channel
+            for (uint32_t p = 0; p < 4; ++p) portPtrs[p] = proc->audio_outputs[p].data32 ? proc->audio_outputs[p].data32[0] : nullptr;
+            out = portPtrs;
+            numCh = 4;
+        } else {
+            out = proc->audio_outputs[0].data32;
+            numCh = proc->audio_outputs[0].channel_count;
+        }
+        for (uint32_t c = 0; c < numCh; ++c) {
+            if (out[c]) std::memset(out[c], 0, numFrames * sizeof(float));
+        }
     }
 
     // Sample-accurate: render up to each event, then apply it.
@@ -387,6 +449,7 @@ bool PaulascapePlugin::stateSave(const clap_ostream_t* stream) {
             put32(static_cast<uint32_t>(bits >> 32));
         }
         blob.push_back(selectedSlot);
+        for (uint8_t v : midiMapBytes(midiMap)) blob.push_back(v);
         ModuleIo::write(currentModule, blob);
     }
     size_t done = 0;
@@ -408,7 +471,7 @@ bool PaulascapePlugin::stateLoad(const clap_istream_t* stream) {
         if (n == 0) break;
         blob.insert(blob.end(), chunk, chunk + n);
     }
-    const size_t header = 8 + PARAM_COUNT * 8 + 1;
+    const size_t header = 8 + PARAM_COUNT * 8 + 1 + MIDI_MAP_ENTRIES;
     if (blob.size() < header) return false;
     auto get32 = [&](size_t off) {
         uint32_t v = 0;
@@ -423,7 +486,8 @@ bool PaulascapePlugin::stateLoad(const clap_istream_t* stream) {
     std::lock_guard<std::mutex> lock(stateMutex);
     stopAllAudio();
     currentModule = std::move(mod);
-    selectedSlot = std::clamp<uint8_t>(blob[header - 1], 1, 31);
+    selectedSlot = std::clamp<uint8_t>(blob[header - 1 - MIDI_MAP_ENTRIES], 1, 31);
+    midiMapFromBytes(midiMap, &blob[header - MIDI_MAP_ENTRIES]);
     for (clap_id i = 0; i < PARAM_COUNT; ++i) {
         const uint64_t bits = static_cast<uint64_t>(get32(8 + i * 8)) | (static_cast<uint64_t>(get32(12 + i * 8)) << 32);
         double v;
@@ -477,6 +541,7 @@ void PaulascapePlugin::setParamFromGui(clap_id id, double value) {
         guiParamQueue.emplace_back(id, applied);
     }
     requestHostFlush();
+    if (id == PARAM_OUTPUT_LAYOUT) requestPortRescan();
 }
 
 void PaulascapePlugin::requestHostFlush() {
@@ -554,6 +619,48 @@ bool PaulascapePlugin::exportMidi(const std::string& path, int patternIndex) {
     }
     return patternIndex >= 0 ? MidiExporter::exportPatternToMidi(copy, patternIndex, path)
                              : MidiExporter::exportSongToMidi(copy, path);
+}
+
+const char* PaulascapePlugin::midiMapEntryName(size_t index) {
+    static const char* names[MIDI_MAP_ENTRIES] = {
+        "Mod wheel: vibrato depth", "Glide time (legato)", "Legato footswitch", "Vibrato/tremolo speed",
+        "Sample offset (9xx)", "Retrigger (E9x)", "Note cut (ECx)", "LED filter (E0x)",
+        "Effect command: number", "Effect command: high", "Effect command: low"};
+    return index < MIDI_MAP_ENTRIES ? names[index] : "";
+}
+
+MidiMap PaulascapePlugin::getMidiMap() {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    return midiMap;
+}
+
+void PaulascapePlugin::adjustMidiMap(size_t index, int delta) {
+    if (index >= MIDI_MAP_ENTRIES) return;
+    std::lock_guard<std::mutex> lock(stateMutex);
+    auto bytes = midiMapBytes(midiMap);
+    bytes[index] = static_cast<uint8_t>(std::clamp<int>(bytes[index] + delta, 0, 127));
+    midiMapFromBytes(midiMap, bytes.data());
+    voicePool.setMidiMap(midiMap);
+}
+
+bool PaulascapePlugin::fourMonoLayout() {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    return params[PARAM_OUTPUT_LAYOUT] >= 0.5;
+}
+
+uint32_t PaulascapePlugin::outputPortCount() { return fourMonoLayout() ? 4 : 1; }
+
+void PaulascapePlugin::setOutputLayoutFromHost(bool fourMono) {
+    std::lock_guard<std::mutex> lock(stateMutex);
+    applyParam(PARAM_OUTPUT_LAYOUT, fourMono ? 1.0 : 0.0);
+}
+
+void PaulascapePlugin::requestPortRescan() {
+    if (!host) return;
+    const auto* ports = static_cast<const clap_host_audio_ports_t*>(
+        host->get_extension ? host->get_extension(host, CLAP_EXT_AUDIO_PORTS) : nullptr);
+    if (ports && ports->rescan) ports->rescan(host, CLAP_AUDIO_PORTS_RESCAN_LIST | CLAP_AUDIO_PORTS_RESCAN_NAMES);
+    if (host->request_restart) host->request_restart(host);
 }
 
 } // namespace paulascape

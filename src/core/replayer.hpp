@@ -56,6 +56,7 @@ public:
     void setResamplerMode(ResamplerMode mode);
     void setFilterModel(FilterModel model);
     void setLedFilter(bool enable);
+    void setNTSC(bool ntsc);
     void setOutputLayout(OutputLayout layout);
     void setStereoSeparation(float separation);
     void setPatternBaseNote(uint8_t note); // e.g., C1 = 24
