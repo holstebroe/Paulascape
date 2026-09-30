@@ -19,7 +19,7 @@ void PaulaVoice::reset() {
     blep.reset();
 }
 
-void PaulaVoice::trigger(const ModSample* sample, uint16_t period, uint8_t volume) {
+void PaulaVoice::trigger(const ModSample* sample, uint16_t period, uint8_t volume, uint32_t startOffset) {
     if (!sample || sample->pcmData.empty()) {
         stop();
         return;
@@ -28,7 +28,7 @@ void PaulaVoice::trigger(const ModSample* sample, uint16_t period, uint8_t volum
     activeSample = sample;
     currentPeriod = (period > 0) ? period : 214;
     currentVolume = std::min<uint8_t>(volume, 64);
-    samplePos = 0.0;
+    samplePos = static_cast<double>(startOffset);
     active = true;
     lastOutputVal = 0.0f;
     blep.reset();
@@ -76,11 +76,13 @@ float PaulaVoice::renderSample() {
     if (paulaRate <= 0.0) return 0.0f;
 
     double posStep = paulaRate / outputSampleRate;
-    size_t length = hdr.length;
+    const size_t length = std::min<size_t>(hdr.length, pcm.size());
+    const bool looped = hdr.loopEnabled && hdr.loopLength > 2 && hdr.loopStart < length;
+    const double loopEnd = looped ? std::min<double>(hdr.loopStart + hdr.loopLength, length) : static_cast<double>(length);
 
-    if (samplePos >= length) {
-        if (hdr.loopEnabled && hdr.loopLength > 2) {
-            samplePos = hdr.loopStart + std::fmod(samplePos - hdr.loopStart, hdr.loopLength);
+    if (samplePos >= loopEnd) {
+        if (looped) {
+            samplePos = hdr.loopStart + std::fmod(samplePos - hdr.loopStart, loopEnd - hdr.loopStart);
         } else {
             stop();
             return 0.0f;
@@ -108,8 +110,8 @@ float PaulaVoice::renderSample() {
         size_t idx1 = static_cast<size_t>(samplePos);
         size_t idx2 = idx1 + 1;
 
-        if (idx2 >= length) {
-            idx2 = hdr.loopEnabled ? hdr.loopStart : idx1;
+        if (idx2 >= loopEnd) {
+            idx2 = looped ? hdr.loopStart : idx1;
         }
 
         float v1 = (idx1 < pcm.size()) ? (pcm[idx1] / 128.0f) : 0.0f;

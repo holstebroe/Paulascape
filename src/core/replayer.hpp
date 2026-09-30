@@ -15,25 +15,33 @@ enum class TempoSyncMode {
 
 struct ReplayerChannelState {
     PaulaVoice voice;
-    uint8_t sample = 0;
-    uint16_t period = 0;
-    uint16_t targetPeriod = 0;
+    uint8_t sample = 0;       // current sample slot 1..31
+    int8_t finetune = 0;
     uint8_t volume = 64;
+    uint16_t period = 0;      // period being played (after slides)
+    uint16_t notePeriod = 0;  // period of the last note on this channel
+    uint16_t wantedPeriod = 0;// tone portamento target
 
-    // Effect memory & state
-    uint8_t portamentoSpeed = 0;
-    uint8_t vibratoSpeed = 0;
-    uint8_t vibratoDepth = 0;
+    uint8_t cmd = 0;          // effect of the current row
+    uint8_t param = 0;
+
+    uint8_t portaSpeed = 0;   // tone portamento memory
+    int8_t portaDir = 0;
+    bool glissando = false;
+    uint8_t vibratoCmd = 0;   // speed/depth memory
     uint8_t vibratoPos = 0;
-    uint8_t tremoloSpeed = 0;
-    uint8_t tremoloDepth = 0;
+    uint8_t vibratoWave = 0;
+    uint8_t tremoloCmd = 0;
     uint8_t tremoloPos = 0;
-    uint8_t sampleOffset = 0;
-    uint8_t glissando = 0;
+    uint8_t tremoloWave = 0;
+    uint8_t sampleOffset = 0; // 9xx memory
 
-    // Volume slide
-    int8_t volSlideSpeed = 0;
-    int8_t portamentoSlideSpeed = 0;
+    uint8_t loopRow = 0;      // E6x
+    uint8_t loopCount = 0;
+    uint8_t delayTick = 0;    // EDx, 0 = none
+    bool delayedTrigger = false;
+    uint8_t pendingSample = 0;
+    uint16_t pendingPeriod = 0;
 };
 
 class Replayer {
@@ -63,6 +71,9 @@ public:
     bool isPlaying() const { return playing; }
     int getCurrentPattern() const { return currentPattern; }
     int getCurrentRow() const { return currentRow; }
+    uint16_t getChannelPeriod(size_t c) const { return channels[c & 3].voice.getPeriod(); }
+    uint8_t getChannelVolume(size_t c) const { return channels[c & 3].voice.getVolume(); }
+    bool isChannelActive(size_t c) const { return channels[c & 3].voice.isActive(); }
     float getScopeOutput(size_t ch) const { return scopeOutputs[ch & 3]; }
 
 private:
@@ -87,6 +98,13 @@ private:
     int currentPattern = 0;
     int currentRow = 0;
 
+    // Requests raised while processing a row, applied when the row ends
+    int jumpOrder = -1;
+    int breakRow = -1;
+    int loopJumpRow = -1;
+    int patternDelay = 0;
+    bool inDelayRepeat = false;
+
     double samplesPerTick = 0.0;
     double sampleCounter = 0.0;
 
@@ -101,6 +119,10 @@ private:
     void processRow();
     void processEffectsOnTick();
     void triggerCell(size_t ch, const NoteCell& cell);
+    void startNote(ReplayerChannelState& ch, uint32_t offset);
+    void advanceRow();
+    void applyTickEffect(ReplayerChannelState& ch);
+    void resetChannels();
 };
 
 } // namespace paulascape

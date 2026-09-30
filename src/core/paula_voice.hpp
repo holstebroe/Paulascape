@@ -15,7 +15,7 @@ public:
     PaulaVoice();
 
     void reset();
-    void trigger(const ModSample* sample, uint16_t period, uint8_t volume = 64);
+    void trigger(const ModSample* sample, uint16_t period, uint8_t volume = 64, uint32_t startOffset = 0);
     void stop();
 
     void setPeriod(uint16_t period);
