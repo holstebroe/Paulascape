@@ -196,8 +196,8 @@ void UiApp::drawSampleMatrix(Framebuffer& fb) {
     text(fb, 32, 50, "Sample name", COL_TEXT);
     text(fb, 216, 50, "Lp", COL_TEXT);
     text(fb, 240, 50, "Vol", COL_TEXT);
-    text(fb, 280, 50, "Fine", COL_TEXT);
-    text(fb, 312, 50, "Leg", COL_TEXT);
+    text(fb, 272, 50, "Fine", COL_TEXT);
+    text(fb, 314, 50, "Leg", COL_TEXT);
     if (sub == 0) text(fb, 352, 50, "Length", COL_TEXT);
     else if (sub == 1) text(fb, 352, 50, "MIDI ch", COL_TEXT);
     else { text(fb, 352, 50, "In key", COL_TEXT); text(fb, 408, 50, "Out key", COL_TEXT); }
@@ -214,7 +214,7 @@ void UiApp::drawSampleMatrix(Framebuffer& fb) {
         if (selected) fb.fillRect(6, y - 1, fb.getWidth() - 12, ROW_H, COL_SEL_BG);
         const uint32_t fg = selected ? COL_SEL_TEXT : (s.length > 0 ? COL_LCD_TEXT : COL_DIM);
 
-        char num[8];
+        char num[16];
         std::snprintf(num, sizeof(num), "%02d", slot);
         text(fb, 8, y, num, fg);
         text(fb, 32, y, padRight(s.name, 22), fg);
