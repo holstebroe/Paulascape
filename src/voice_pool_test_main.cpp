@@ -77,6 +77,32 @@ void testModes() {
     rig.pool.noteOn(9, 60, 127); // slot 10 is empty
     assert(rig.pool.activeVoiceCount() == 0);
 
+    // A program change overrides the channel's slot, in multi-channel mode as well as single mode.
+    // Slot 2 is an inverted copy of the others, so the rendered waveforms tell them apart.
+    auto renderNote = [&](uint8_t channel) {
+        rig.pool.allNotesOff();
+        rig.pool.noteOn(channel, 60, 127);
+        std::vector<float> a(300);
+        rig.run(300, a.data());
+        return a;
+    };
+    rig.pool.setResamplerMode(ResamplerMode::Clean); // no filter or BLEP state carried between notes
+    rig.pool.setFilterModel(FilterModel::Off);
+    rig.pool.programChange(1, 3);            // program 3 = slot 4 on channel 1 (normally slot 2)
+    const auto viaProgram = renderNote(1);
+    rig.pool.programChange(1, 1);            // program 1 = slot 2 again
+    const auto slot2 = renderNote(1);
+    const auto slot4 = renderNote(3);        // channel 3 plays slot 4 by default
+    double same = 0, inverted = 0;
+    for (size_t i = 0; i < viaProgram.size(); ++i) {
+        same += std::fabs(viaProgram[i] - slot4[i]);
+        inverted += std::fabs(viaProgram[i] + slot2[i]);
+    }
+    assert(same < 0.001 && inverted < 0.001);
+    rig.pool.setResamplerMode(ResamplerMode::Authentic);
+    rig.pool.setFilterModel(FilterModel::A500);
+    rig.pool.allNotesOff();
+
     // Drum: in key picks the sample, out key sets the pitch; unmapped keys are silent
     rig.pool.setPlaybackMode(PlaybackMode::Drum);
     rig.mod.samples[2].header.outKey = 72; // one octave up

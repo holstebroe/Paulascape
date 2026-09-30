@@ -305,7 +305,8 @@ void VoicePool::noteOn(uint8_t midiChannel, uint8_t key, uint8_t velocity) {
             sampleSlot = channelProgram[midiChannel] ? channelProgram[midiChannel] : selectedSlot;
             break;
         case PlaybackMode::MultiChannel:
-            sampleSlot = std::clamp<uint8_t>(midiChannel + 1, 1, 31);
+            // channel n plays slot n, unless a program change has chosen another sample for that channel
+            sampleSlot = channelProgram[midiChannel] ? channelProgram[midiChannel] : std::clamp<uint8_t>(midiChannel + 1, 1, 31);
             break;
         case PlaybackMode::Drum: {
             bool found = false;
