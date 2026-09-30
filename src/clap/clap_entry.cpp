@@ -2,6 +2,13 @@
 #include <clap/clap.h>
 #include <cstring>
 
+static const char* s_features[] = {
+    CLAP_PLUGIN_FEATURE_INSTRUMENT,
+    CLAP_PLUGIN_FEATURE_SAMPLER,
+    CLAP_PLUGIN_FEATURE_STEREO,
+    nullptr
+};
+
 static const clap_plugin_descriptor_t s_paulascape_desc = {
     .clap_version = CLAP_VERSION_INIT,
     .id = "org.holstebroe.paulascape",
@@ -12,12 +19,7 @@ static const clap_plugin_descriptor_t s_paulascape_desc = {
     .support_url = "",
     .version = "1.0.0",
     .description = "Amiga ProTracker MOD Instrument Plugin",
-    .features = (const char*[]){
-        CLAP_PLUGIN_FEATURE_INSTRUMENT,
-        CLAP_PLUGIN_FEATURE_SAMPLER,
-        CLAP_PLUGIN_FEATURE_STEREO,
-        nullptr
-    }
+    .features = s_features
 };
 
 // Params extension
