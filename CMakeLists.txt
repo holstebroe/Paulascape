@@ -77,7 +77,13 @@ add_paulascape_test(midi_export_test src/export/midi_export_test_main.cpp)
 add_paulascape_test(clap_plugin_test src/clap/clap_plugin_test_main.cpp)
 add_paulascape_test(gui_render_test src/gui/gui_render_test_main.cpp)
 
-# Include deployment cmake logic if available
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployClap.cmake")
-    include(cmake/DeployClap.cmake)
-endif()
+# Build the plugin and copy the .clap to the folder in the CLAPTEST environment
+# variable. Not part of ALL: a host that has the plugin loaded locks the file,
+# so a plain build should not fail on the copy.
+add_custom_target(deploy_clap
+    COMMAND ${CMAKE_COMMAND} -DCLAP_FILE=$<TARGET_FILE:Paulascape>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/DeployClap.cmake
+    COMMENT "Deploying Paulascape.clap to %CLAPTEST%"
+    VERBATIM
+)
+add_dependencies(deploy_clap Paulascape)
