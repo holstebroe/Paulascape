@@ -2,59 +2,50 @@
 
 This document tracks implementation progress against the design goals in `Paulascape_design.md`.
 
-## Milestones & Status
+## Status
 
-- [x] **Milestone 1: Repository Setup & Build Infrastructure**
-  - CMake build system configured with C++23.
-  - CLAP SDK integrated.
-  - Test framework initialized with `ctest`.
-  - Github Actions CI workflow.
+An audit against `Paulascape_design.md` (2026-09-30) found the earlier "all milestones complete" claim premature.
+What exists is an engine skeleton plus static GUI renderers. The plugin has **no window**, cannot load a MOD,
+and most design features are stubs. Legend: [x] done, [~] partial, [ ] missing.
 
-- [x] **Milestone 2: Core Data Structures & MOD Loader**
-  - ProTracker 2 period tables, finetune tables, vibrato sine, font, and UI bitmaps ported (`src/core/pt2/`).
-  - Parser for 31-sample and legacy 15-sample ProTracker MOD files (`src/core/mod_loader.cpp`).
-  - Unit tests verified (`src/mod_loader_test_main.cpp`).
+## Audit: design vs. code
 
-- [x] **Milestone 3: Paula Voice, BLEP Synthesis & RC Filters**
-  - 8-bit signed sample playback with period-to-rate calculation (`src/core/paula_voice.cpp`).
-  - BLEP synthesis for anti-aliased authentic Amiga output (`src/core/blep.cpp`).
-  - Linear/interpolated clean mode resampler.
-  - A500/A1200 low-pass / high-pass RC filter model and 2-pole LED filter (`src/core/rc_filters.cpp`).
-  - Unit tests verified (`src/paula_voice_test_main.cpp`).
+| Area | State | Gap |
+| --- | --- | --- |
+| Build, CMake, deploy_clap, CI | [x] | `deploy_clap` now copies to `%CLAPTEST%` (Acidus style). No clap-validator step, no release job on `v*.*.*` tags, no test MODs/reference renders/tools |
+| Core: MOD loader, tables, Paula voice, BLEP, RC filters | [~] | Unit-tested in isolation; not compared with pt2-clone renders; no PAL/NTSC clock setting, no <31.4 kHz oversampling |
+| Voice pool | [~] | Round-robin, legato by slot/CC flag exist. Missing: multi-channel and drum routing by MIDI channel / in-key, velocity->Cxx check, note-off fade in clean mode, 4-mono output, CC 5 glide |
+| MIDI effects / CC mapping | [ ] | No CC handling in the plugin at all (mod wheel, CC 68/70-74/20-22, pressure, pitch bend events ignored) |
+| Replayer (pattern mode) | [~] | Only Bxx, Cxx, Dxx, Fxx implemented. Missing 0xy, 1xx, 2xx, 3xx, 4xy, 5xy, 6xy, 7xy, 9xx, Axy and all Exy; no loop-while-held/newest-wins verification, no song-order key verification, rows-per-beat / start-speed tempo math to verify |
+| CLAP wrapper | [~] | Params: only 7 of 12 exposed and they are read only via events (flush is empty, no GUI->host param changes). No audio-ports-config (4-mono needs it), no `clap.gui`, no `clap.latency`/`tail`. State saves only the MOD title: no samples, settings or slot settings |
+| MOD loading | [ ] | Nothing calls `ModLoader` from the plugin; no open dialog, no drag and drop |
+| WAV import | [~] | Converter done; not reachable from the UI (no drop, result not stored in state) |
+| MIDI export | [~] | Writer exists; no UI icon, no drag-out, no effect CC verification against plugin playback |
+| GUI | [ ] | Renderers only draw hard-coded text. No native window (X11/Win32/Cocoa), no `clap.gui`, no mouse/keyboard input, no scale, no real ProTracker bitmaps/bevels, settings screen shows constants, sample matrix ignores mode, only 12 of 31 rows, scopes not fed by audio |
+| Docs/release | [ ] | README overstates features; no tagged release flow |
 
-- [x] **Milestone 4: Voice Pool & Polyphonic Routing Engine**
-  - 32-voice allocation manager (`src/core/voice_pool.cpp`).
-  - Amiga 4-channel round-robin voice distribution.
-  - Stereo panning (hard L R R L / adjustable stereo separation) and 4-mono output bus layouts.
-  - Legato mode and CC 68 / CC 5 handling.
-  - Unit tests verified (`src/voice_pool_test_main.cpp`).
+## Milestones
 
-- [x] **Milestone 5: ProTracker Replayer Engine**
-  - Tick-based replayer processing standard ProTracker 2 effects (`src/core/replayer.cpp`).
-  - Pattern playback and song order traversal.
-  - Scaled host tempo synchronization (host tempo / MOD starting tempo).
-  - Unit tests verified (`src/replayer_test_main.cpp`).
+### Done
+- [x] M1 Repo setup, CMake C++23, CLAP submodule, CI, `deploy_clap`
+- [x] M2 MOD loader and pt2 tables/font data
+- [x] M3 Paula voice, BLEP, RC filters (unit tested)
+- [x] M4 Voice pool basics
+- [x] M6 WAV converter (engine side only)
+- [x] M7 MIDI writer (basic)
 
-- [x] **Milestone 6: WAV Sample Importer**
-  - Mono downmixing, resampling to 16,574 Hz, 8-bit signed quantization, 128 KB crop (`src/import/wav_import.cpp`).
-  - Extraction of loop points and root pitch from `smpl` chunk.
-  - Unit tests verified (`src/import/wav_import_test_main.cpp`).
+### Open (work order)
+- [ ] **A. Usable plugin shell:** `clap.gui` with a native window (X11 and Win32 first, Cocoa later), framebuffer blit at 2x/3x, mouse input; shared `PluginState` (module, settings) between audio and GUI thread
+- [ ] **B. Front page that works:** load a MOD (open dialog + drop), 31-row scrollable matrix, per-mode columns, select/edit loop, volume, finetune, legato, in/out key, instrument/pattern and sub-mode buttons, live scopes
+- [ ] **C. Settings screen that works:** every setting in the design table editable, back button, gear icon
+- [ ] **D. Complete state:** save/load module samples, slot settings, all settings; all 12 params exposed with flush and text_to_value
+- [ ] **E. Modes:** multi-channel and drum routing, 4-mono + audio-ports-config, clean-mode fade, PAL/NTSC
+- [ ] **F. MIDI effects:** CC/pitch bend/pressure/mod wheel handling, tick-based per-voice effects, CC 5 glide, CC 68
+- [ ] **G. Replayer:** all ProTracker effects; verify loop/newest-wins/song key; tempo math
+- [ ] **H. WAV import in UI:** drop on slot, store in state
+- [ ] **I. MIDI export in UI:** icon, save/drag-out, effect CC round trip test
+- [ ] **J. Validation:** clap-validator in CI, pt2-clone reference renders, test MODs, tools/
+- [ ] **K. Release:** tag workflow, README corrected
 
-- [x] **Milestone 7: MIDI Export Engine**
-  - Pattern note export & full song timeline unrolling to MIDI tracks (`src/export/midi_export.cpp`).
-  - Effect command encoding on CC 20–22.
-  - Unit tests verified (`src/export/midi_export_test_main.cpp`).
-
-- [x] **Milestone 8: CLAP Plugin Wrapper & State Management**
-  - CLAP plugin entry point, descriptor, and factory (`src/clap/clap_entry.cpp`).
-  - Sound settings & CC mapping parameter interface (`src/clap/paulascape_plugin.cpp`).
-  - Audio rendering & note event handling.
-  - State serialization/deserialization.
-  - Unit tests verified (`src/clap/clap_plugin_test_main.cpp`).
-
-- [x] **Milestone 9: Software Framebuffer & GUI Screens**
-  - Software framebuffer renderer (`src/gui/framebuffer.cpp`) and pt2-clone 8x8 font engine (`src/gui/font_renderer.cpp`).
-  - Scope visualizer for 4 Amiga channels (`src/gui/scopes.cpp`).
-  - Front Page UI (`src/gui/front_page.cpp`).
-  - Settings Screen UI (`src/gui/settings_screen.cpp`).
-  - Unit tests verified (`src/gui/gui_render_test_main.cpp`).
+## Progress log
+- 2026-09-30: audit, plan rewritten, `deploy_clap` target added.
