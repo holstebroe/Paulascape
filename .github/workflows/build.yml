@@ -2,13 +2,15 @@ name: Build & Test
 
 on:
   push:
-    branches: [ main, "jules*" ]
+    branches: [ main, "claude/**", "jules*" ]
+    tags: [ "v*.*.*" ]
   pull_request:
     branches: [ main ]
 
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
@@ -18,6 +20,10 @@ jobs:
         with:
           submodules: true
 
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev xvfb
+
       - name: Configure CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
@@ -26,3 +32,37 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Collect plugin
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "$(find build -name 'Paulascape.clap' | head -n 1)" dist/
+          cp LICENSE THIRD_PARTY_LICENSES.md README.md dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Paulascape-${{ runner.os }}
+          path: dist
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Zip each OS build
+        run: |
+          cd artifacts
+          for d in Paulascape-*; do
+            (cd "$d" && zip -r "../${d}-${GITHUB_REF_NAME}.zip" .)
+          done
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*.zip

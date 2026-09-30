@@ -302,7 +302,7 @@ void VoicePool::noteOn(uint8_t midiChannel, uint8_t key, uint8_t velocity) {
     uint8_t sampleSlot = 1;
     switch (playbackMode) {
         case PlaybackMode::Single:
-            sampleSlot = selectedSlot;
+            sampleSlot = channelProgram[midiChannel] ? channelProgram[midiChannel] : selectedSlot;
             break;
         case PlaybackMode::MultiChannel:
             sampleSlot = std::clamp<uint8_t>(midiChannel + 1, 1, 31);
@@ -369,7 +369,8 @@ void VoicePool::noteOn(uint8_t midiChannel, uint8_t key, uint8_t velocity) {
     slot.wantedPeriod = 0.0;
     slot.portaSpeed = 0;
     slot.finetune = smp.header.finetune;
-    slot.baseVolume = static_cast<uint8_t>((smp.header.volume * velocity + 63) / 127);
+    // Velocity is Cxx: 0-127 scaled to 0-64 (the slot's own volume is the pattern-mode default)
+    slot.baseVolume = static_cast<uint8_t>(std::clamp((velocity * 64 + 63) / 127, 1, 64));
     slot.cmd = slot.param = 0;
     slot.vibratoPos = slot.vibratoWave = slot.tremoloPos = slot.tremoloWave = 0;
     slot.vibratoCmd = slot.tremoloCmd = 0;

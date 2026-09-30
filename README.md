@@ -4,34 +4,39 @@ Paulascape is an MIT-licensed CLAP instrument plugin that loads a ProTracker MOD
 
 ## Features
 
-- **Paula Sound Engine:** 8-bit DMA sample playback with period-to-rate calculation, BLEP anti-aliased synthesis, A500/A1200 RC filters, and 2-pole LED low-pass filter.
-- **Playback Modes:**
-  - **Instrument Modes:** Single (Channel 1), Multi-channel (Channel $n$ plays sample slot $n$), and Drum Map mode.
-  - **Pattern Mode:** Loops MOD patterns from MIDI keys (C1 = pattern 0, C0 = full song order playback).
-- **32-Voice Pool:** Amiga 4-channel round-robin voice distribution with hard stereo panning (L R R L) or 4-mono output routing.
-- **Resampler Modes:** Authentic (Paula + BLEP) and Clean (linear interpolation).
-- **MIDI Effects & Expressiveness:** CC 68 legato footswitch, pitch bend portamento, velocity volume scaling, and CC 20–22 effect command encoding.
-- **WAV Sample Import:** Drag/drop sample import converted to Amiga quality (16,574 Hz, 8-bit signed mono, cropped to 128 KB, with `smpl` chunk loop parsing).
-- **MIDI Export:** Song unrolling and pattern export to standard `.mid` files with CC 20–22 effect command nibble encoding.
-- **ProTracker UI:** Software pixel framebuffer GUI using pt2-clone 8x8 font, sample matrix, 4-channel oscilloscope scope displays, and settings page.
+- **Paula sound engine:** 8-bit sample playback with period-to-rate calculation, BLEP anti-aliasing, A500/A1200 RC filters and the 2-pole LED filter. Clean (interpolated) mode is the alternative.
+- **Playback modes:** single, multi-channel and drum instrument modes on a 32-voice pool with Amiga round-robin channels (stereo L R R L with adjustable separation, or four mono outputs), and pattern mode (C1 = pattern 0, C0 = whole song, looped while the key is held).
+- **MIDI control:** velocity, pitch bend, mod wheel vibrato, channel pressure tremolo, CC 68 legato, CC 5 glide, CC 70-74 sample offset / retrigger / note cut / LED filter, CC 20-22 effect commands. All CC numbers can be changed.
+- **Full ProTracker replayer** for pattern mode (all effects except EFx funk repeat), tempo scaled to the host.
+- **WAV import** into any slot, converted to Amiga quality (16,574 Hz, 8-bit, cropped to 128 KB).
+- **MIDI export:** a pattern-mode clip, or a note-by-note export (four tracks, tempo map, program changes, effect-command CCs) that plays back through the plugin.
+- **ProTracker-style GUI** drawn into a software framebuffer with pt2-clone's font: front page with sample matrix and live channel scopes, settings page, MIDI mapping page. X11 and Win32 windows; macOS has no GUI yet.
+
+See `PROJECT_PLAN.md` for what is done and what is still open.
 
 ## Building & Testing
 
 ### Requirements
 - CMake 3.20+
 - C++23 capable compiler (GCC 13+, Clang 16+, or MSVC 2022+)
+- Linux: X11 development headers (`libx11-dev`); `xvfb` to run the window tests
 
 ### Build Instructions
 
 ```bash
-# Configure CMake
+git submodule update --init
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-
-# Build plugin and test executables
 cmake --build build --config Release
-
-# Run test suite
 ctest --test-dir build --output-on-failure
+```
+
+### Deploying while developing
+
+Set `CLAPTEST` to the folder your DAW scans for CLAP plugins, then build the `deploy_clap` target. It builds the plugin and copies `Paulascape.clap` there. It is not part of the default build, because a host that has the plugin loaded locks the file.
+
+```bash
+export CLAPTEST=~/.clap          # Windows: set CLAPTEST=C:\Program Files\Common Files\CLAP
+cmake --build build --target deploy_clap
 ```
 
 ## License

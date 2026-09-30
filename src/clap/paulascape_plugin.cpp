@@ -259,6 +259,7 @@ void PaulascapePlugin::handleMidi(const uint8_t* d) {
                 voicePool.controlChange(ch, d[1], d[2]);
             }
             break;
+        case 0xC0: voicePool.programChange(ch, d[1]); break;
         case 0xD0: voicePool.channelPressure(ch, d[1]); break;
         case 0xE0: voicePool.setPitchBendValue(ch, d[1] | (d[2] << 7)); break;
         default: break;
@@ -661,6 +662,18 @@ void PaulascapePlugin::requestPortRescan() {
         host->get_extension ? host->get_extension(host, CLAP_EXT_AUDIO_PORTS) : nullptr);
     if (ports && ports->rescan) ports->rescan(host, CLAP_AUDIO_PORTS_RESCAN_LIST | CLAP_AUDIO_PORTS_RESCAN_NAMES);
     if (host->request_restart) host->request_restart(host);
+}
+
+bool PaulascapePlugin::exportPatternClip(const std::string& path) {
+    Module copy;
+    int base, rows;
+    {
+        std::lock_guard<std::mutex> lock(stateMutex);
+        copy = currentModule;
+        base = static_cast<int>(params[PARAM_PATTERN_BASE_NOTE]);
+        rows = params[PARAM_ROWS_PER_BEAT] >= 0.5 ? 8 : 4;
+    }
+    return MidiExporter::exportPatternClip(copy, path, base, rows);
 }
 
 } // namespace paulascape

@@ -104,7 +104,8 @@ public:
     bool importWavToSlot(uint8_t slot, const std::string& path);
     void selectSlot(uint8_t slot);
     void adjustSlot(uint8_t slot, SlotField field, int delta);
-    bool exportMidi(const std::string& path, int patternIndex);
+    bool exportMidi(const std::string& path, int patternIndex);   // full note export, -1 = whole song
+    bool exportPatternClip(const std::string& path);              // pattern-mode clip for this plugin
     const ScopeTap& scopeTap() const { return scope; }
 
     // MIDI CC mapping (settings screen). Index order matches midiMapEntryName().

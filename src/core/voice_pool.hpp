@@ -88,7 +88,11 @@ public:
     void setPlaybackMode(PlaybackMode mode);
     void setNTSC(bool ntsc);
     void setHostTempo(double bpm);
-    void setSelectedSlot(uint8_t slot) { selectedSlot = slot < 1 ? 1 : (slot > 31 ? 31 : slot); }
+    void setSelectedSlot(uint8_t slot) {
+        selectedSlot = slot < 1 ? 1 : (slot > 31 ? 31 : slot);
+        channelProgram.fill(0); // choosing a slot by hand overrides MIDI program changes
+    }
+    void programChange(uint8_t midiChannel, uint8_t program) { channelProgram[midiChannel & 15] = static_cast<uint8_t>(std::min<int>(program + 1, 31)); }
     void setMidiMap(const MidiMap& map) { midiMap = map; }
     const MidiMap& getMidiMap() const { return midiMap; }
     void setPitchBendRange(double semitones) { bendRange = semitones; }
@@ -153,6 +157,7 @@ private:
     std::array<ChannelState, 16> channels;
 
     uint8_t selectedSlot = 1;
+    std::array<uint8_t, 16> channelProgram{}; // sample slot chosen by MIDI program change, 0 = use selectedSlot
     uint8_t nextAmigaChannel = 0;
     uint32_t globalAge = 0;
     double samplesPerTick = 918.75;

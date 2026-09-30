@@ -61,7 +61,7 @@ private:
     void clampScroll();
     void loadModDialog();
     void importWavDialog();
-    void exportMidiDialog();
+    void exportMidiDialog(bool notes);
     void cycleParam(clap_id id, int button, bool shift);
 };
 

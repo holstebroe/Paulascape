@@ -27,6 +27,7 @@ set(PAULASCAPE_CORE_SOURCES
     src/core/replayer.cpp
     src/import/wav_import.cpp
     src/export/midi_export.cpp
+    src/export/song_unroll.cpp
     src/clap/paulascape_plugin.cpp
 )
 
@@ -68,6 +69,7 @@ set_target_properties(Paulascape PROPERTIES
 )
 
 # Helper function to add test executables
+# Third argument NO_CTEST builds the executable only (tests that need a wrapper command).
 function(add_paulascape_test TEST_NAME TEST_SOURCE)
     add_executable(${TEST_NAME} ${TEST_SOURCE})
     target_link_libraries(${TEST_NAME} PRIVATE paulascape_core paulascape_gui)
@@ -77,7 +79,9 @@ function(add_paulascape_test TEST_NAME TEST_SOURCE)
     else()
         target_compile_options(${TEST_NAME} PRIVATE -UNDEBUG)
     endif()
-    add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+    if(NOT "${ARGV2}" STREQUAL "NO_CTEST")
+        add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
+    endif()
 endfunction()
 
 # Unit tests
@@ -88,6 +92,7 @@ add_paulascape_test(replayer_test src/replayer_test_main.cpp)
 target_compile_definitions(replayer_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(wav_import_test src/import/wav_import_test_main.cpp)
 add_paulascape_test(midi_export_test src/export/midi_export_test_main.cpp)
+target_compile_definitions(midi_export_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(clap_plugin_test src/clap/clap_plugin_test_main.cpp)
 target_compile_definitions(clap_plugin_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(gui_render_test src/gui/gui_render_test_main.cpp)
@@ -98,11 +103,23 @@ if(UNIX AND NOT APPLE)
     # Window smoke test: needs a display, so it runs under Xvfb when that is installed.
     find_program(XVFB_RUN xvfb-run)
     if(XVFB_RUN)
-        add_paulascape_test(gui_window_x11_test src/gui/gui_window_x11_test_main.cpp)
+        add_paulascape_test(gui_window_x11_test src/gui/gui_window_x11_test_main.cpp NO_CTEST)
         target_compile_definitions(gui_window_x11_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
-        set_tests_properties(gui_window_x11_test PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
         add_test(NAME gui_window_x11_test_xvfb COMMAND ${XVFB_RUN} -a $<TARGET_FILE:gui_window_x11_test>)
-        set_tests_properties(gui_window_x11_test PROPERTIES DISABLED TRUE)
+    endif()
+endif()
+
+if(UNIX)
+    # Loads the built .clap like a host would; GUI checks run when a display exists.
+    add_paulascape_test(clap_host_test src/clap/clap_host_test_main.cpp NO_CTEST)
+    target_link_libraries(clap_host_test PRIVATE ${CMAKE_DL_LIBS})
+    if(NOT APPLE)
+        target_link_libraries(clap_host_test PRIVATE X11::X11)
+    endif()
+    add_dependencies(clap_host_test Paulascape)
+    add_test(NAME clap_host_test_plugin COMMAND clap_host_test $<TARGET_FILE:Paulascape> x)
+    if(XVFB_RUN)
+        add_test(NAME clap_host_test_xvfb COMMAND ${XVFB_RUN} -a $<TARGET_FILE:clap_host_test> $<TARGET_FILE:Paulascape> x)
     endif()
 endif()
 

@@ -123,10 +123,12 @@ void UiApp::importWavDialog() {
                                                               : "Could not import WAV";
 }
 
-void UiApp::exportMidiDialog() {
-    const std::string path = saveFileDialog("Export song as MIDI", "song.mid", "MIDI file", "mid");
+void UiApp::exportMidiDialog(bool notes) {
+    const std::string path = saveFileDialog(notes ? "Export song as MIDI notes" : "Export pattern-mode MIDI clip",
+                                            notes ? "song_notes.mid" : "song_patterns.mid", "MIDI file", "mid");
     if (path.empty()) return;
-    status = plugin.exportMidi(path, -1) ? "Exported MIDI" : "MIDI export failed";
+    const bool ok = notes ? plugin.exportMidi(path, -1) : plugin.exportPatternClip(path);
+    status = ok ? (notes ? "Exported MIDI notes" : "Exported pattern clip") : "MIDI export failed";
 }
 
 void UiApp::render(Framebuffer& fb) {
@@ -154,7 +156,8 @@ void UiApp::drawFront(Framebuffer& fb) {
         plugin.setParamFromGui(PARAM_PLAYBACK_MODE, 1);
     });
     button(fb, 432, 4, 72, 18, "Open MOD", false, [this](int, bool) { loadModDialog(); });
-    button(fb, 508, 4, 48, 18, "MIDI", false, [this](int, bool) { exportMidiDialog(); });
+    button(fb, 508, 4, 40, 18, "MIDI", false, [this](int, bool) { exportMidiDialog(false); });
+    button(fb, 550, 4, 48, 18, "Notes", false, [this](int, bool) { exportMidiDialog(true); });
     button(fb, 600, 4, 36, 18, "", false, [this](int, bool) { screen = Screen::Settings; });
     gear(fb, 614, 9, COL_TEXT);
 
