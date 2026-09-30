@@ -35,8 +35,9 @@ set(PAULASCAPE_GUI_SOURCES
     src/gui/framebuffer.cpp
     src/gui/font_renderer.cpp
     src/gui/scopes.cpp
-    src/gui/front_page.cpp
-    src/gui/settings_screen.cpp
+    src/gui/ui_app.cpp
+    src/gui/file_dialog.cpp
+    src/gui/gui_window.cpp
 )
 
 # CLAP plugin entry point sources
@@ -49,11 +50,16 @@ add_library(paulascape_core STATIC ${PAULASCAPE_CORE_SOURCES})
 
 # Create GUI static library
 add_library(paulascape_gui STATIC ${PAULASCAPE_GUI_SOURCES})
-target_link_libraries(paulascape_gui PRIVATE paulascape_core)
+target_link_libraries(paulascape_gui PUBLIC paulascape_core)
 
 # Create CLAP Plugin MODULE library
 add_library(Paulascape MODULE ${PAULASCAPE_CLAP_SOURCES})
-target_link_libraries(Paulascape PRIVATE paulascape_core paulascape_gui)
+target_link_libraries(Paulascape PRIVATE paulascape_gui paulascape_core)
+if(UNIX AND NOT APPLE)
+    find_package(X11 REQUIRED)
+    target_link_libraries(Paulascape PRIVATE X11::X11 pthread)
+    target_link_libraries(paulascape_gui PUBLIC X11::X11 pthread)
+endif()
 set_target_properties(Paulascape PROPERTIES
     PREFIX ""
     SUFFIX ".clap"
@@ -84,6 +90,20 @@ add_paulascape_test(midi_export_test src/export/midi_export_test_main.cpp)
 add_paulascape_test(clap_plugin_test src/clap/clap_plugin_test_main.cpp)
 target_compile_definitions(clap_plugin_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(gui_render_test src/gui/gui_render_test_main.cpp)
+add_paulascape_test(ui_app_test src/gui/ui_app_test_main.cpp)
+target_compile_definitions(ui_app_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
+
+if(UNIX AND NOT APPLE)
+    # Window smoke test: needs a display, so it runs under Xvfb when that is installed.
+    find_program(XVFB_RUN xvfb-run)
+    if(XVFB_RUN)
+        add_paulascape_test(gui_window_x11_test src/gui/gui_window_x11_test_main.cpp)
+        target_compile_definitions(gui_window_x11_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
+        set_tests_properties(gui_window_x11_test PROPERTIES WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+        add_test(NAME gui_window_x11_test_xvfb COMMAND ${XVFB_RUN} -a $<TARGET_FILE:gui_window_x11_test>)
+        set_tests_properties(gui_window_x11_test PROPERTIES DISABLED TRUE)
+    endif()
+endif()
 
 # Build the plugin and copy the .clap to the folder in the CLAPTEST environment
 # variable. Not part of ALL: a host that has the plugin loaded locks the file,

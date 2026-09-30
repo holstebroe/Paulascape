@@ -21,7 +21,7 @@ and most design features are stubs. Legend: [x] done, [~] partial, [ ] missing.
 | MOD loading | [ ] | Nothing calls `ModLoader` from the plugin; no open dialog, no drag and drop |
 | WAV import | [~] | Converter done; not reachable from the UI (no drop, result not stored in state) |
 | MIDI export | [~] | Writer exists; no UI icon, no drag-out, no effect CC verification against plugin playback |
-| GUI | [ ] | Renderers only draw hard-coded text. No native window (X11/Win32/Cocoa), no `clap.gui`, no mouse/keyboard input, no scale, no real ProTracker bitmaps/bevels, settings screen shows constants, sample matrix ignores mode, only 12 of 31 rows, scopes not fed by audio |
+| GUI | [~] | (see milestones A-D for what is now done) Originally: renderers only draw hard-coded text. No native window (X11/Win32/Cocoa), no `clap.gui`, no mouse/keyboard input, no scale, no real ProTracker bitmaps/bevels, settings screen shows constants, sample matrix ignores mode, only 12 of 31 rows, scopes not fed by audio |
 | Docs/release | [ ] | README overstates features; no tagged release flow |
 
 ## Milestones
@@ -35,10 +35,10 @@ and most design features are stubs. Legend: [x] done, [~] partial, [ ] missing.
 - [x] M7 MIDI writer (basic)
 
 ### Open (work order)
-- [ ] **A. Usable plugin shell:** `clap.gui` with a native window (X11 and Win32 first, Cocoa later), framebuffer blit at 2x/3x, mouse input; shared `PluginState` (module, settings) between audio and GUI thread
-- [ ] **B. Front page that works:** load a MOD (open dialog + drop), 31-row scrollable matrix, per-mode columns, select/edit loop, volume, finetune, legato, in/out key, instrument/pattern and sub-mode buttons, live scopes
-- [ ] **C. Settings screen that works:** every setting in the design table editable, back button, gear icon
-- [ ] **D. Complete state:** save/load module samples, slot settings, all settings; all 12 params exposed with flush and text_to_value
+- [x] **A. Usable plugin shell:** `clap.gui` with native X11 and Win32 windows (Win32 code is untested: no Windows machine here), framebuffer blit at 1x-3x, mouse input, GUI/audio state sharing with a mutex and snapshot. *Open:* Cocoa window (macOS has no GUI yet), keyboard input, XDND file drop on X11, host-thread-safe `request_resize`
+- [x] **B. Front page that works:** open MOD dialog, drop (Win32), 31-row scrollable matrix with per-mode columns, select/loop/volume/finetune/legato/in/out key editing, instrument/pattern and sub-mode buttons, live scopes, real pt2-clone font. *Open:* pt2-clone bevel bitmaps/palette, MIDI drag-out, WAV drop on X11
+- [x] **C. Settings screen:** all sound settings editable. *Open:* Clock (PAL/NTSC), MIDI mapping table (needs F)
+- [x] **D. State and params:** all 12 params with flush, text conversion, enum flags; state saves params, slot settings and the whole module (samples, patterns). *Open:* host notification of GUI changes beyond `request_flush` is untested in a real host
 - [ ] **E. Modes:** multi-channel and drum routing, 4-mono + audio-ports-config, clean-mode fade, PAL/NTSC
 - [ ] **F. MIDI effects:** CC/pitch bend/pressure/mod wheel handling, tick-based per-voice effects, CC 5 glide, CC 68
 - [ ] **G. Replayer:** all ProTracker effects; verify loop/newest-wins/song key; tempo math
@@ -49,3 +49,4 @@ and most design features are stubs. Legend: [x] done, [~] partial, [ ] missing.
 
 ## Progress log
 - 2026-09-30: audit, plan rewritten, `deploy_clap` target added.
+- 2026-09-30: milestones A-D implemented: plugin state/API rewrite, UI, X11/Win32 windows, `clap.gui`. Tests now keep `assert` in Release (they were no-ops). New tests use `test/mods/BEDROCK.MOD`; `gui_window_x11_test_xvfb` runs under Xvfb. Replaced the stub font with pt2-clone's real one.

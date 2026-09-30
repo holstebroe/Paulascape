@@ -71,7 +71,7 @@ enum class SlotField { Volume, Finetune, Loop, Legato, InKey, OutKey };
 class PaulascapePlugin {
 public:
     PaulascapePlugin(const clap_host_t* host);
-    ~PaulascapePlugin();
+    virtual ~PaulascapePlugin();
 
     bool init();
     void destroy();

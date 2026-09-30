@@ -1,4 +1,7 @@
 #include "paulascape_plugin.hpp"
+#include "gui/gui_window.hpp"
+#include "gui/ui_app.hpp"
+#include <memory>
 #include <clap/clap.h>
 #include <cstring>
 
@@ -7,6 +10,113 @@ static const char* s_features[] = {
     CLAP_PLUGIN_FEATURE_SAMPLER,
     CLAP_PLUGIN_FEATURE_STEREO,
     nullptr
+};
+
+// The CLAP plugin instance: the engine plus the optional GUI.
+struct Instance : paulascape::PaulascapePlugin {
+    explicit Instance(const clap_host_t* host) : PaulascapePlugin(host), host(host) {}
+    const clap_host_t* host;
+    std::unique_ptr<paulascape::UiApp> ui;
+    std::unique_ptr<paulascape::GuiWindow> window;
+    bool floating = false;
+
+    void ensureUi() {
+        if (ui) return;
+        ui = std::make_unique<paulascape::UiApp>(*this);
+        ui->onScaleChanged = [this](int scale) {
+            if (window) window->setScale(scale);
+            const auto* gui = static_cast<const clap_host_gui_t*>(host->get_extension ? host->get_extension(host, CLAP_EXT_GUI) : nullptr);
+            if (gui && gui->request_resize && !floating) {
+                uint32_t w, h;
+                window->pixelSize(w, h);
+                gui->request_resize(host, w, h);
+            }
+        };
+        window = std::make_unique<paulascape::GuiWindow>(*ui);
+    }
+};
+
+static Instance* inst(const clap_plugin_t* plugin) {
+    return static_cast<Instance*>(static_cast<paulascape::PaulascapePlugin*>(plugin->plugin_data));
+}
+
+// GUI extension
+static bool gui_is_api_supported(const clap_plugin_t*, const char* api, bool) {
+    return paulascape::GuiWindow::isSupported() && api && std::strcmp(api, paulascape::GuiWindow::clapApi()) == 0;
+}
+static bool gui_get_preferred_api(const clap_plugin_t*, const char** api, bool* is_floating) {
+    if (!paulascape::GuiWindow::isSupported()) return false;
+    *api = paulascape::GuiWindow::clapApi();
+    *is_floating = false;
+    return true;
+}
+static bool gui_create(const clap_plugin_t* plugin, const char* api, bool is_floating) {
+    if (!gui_is_api_supported(plugin, api, is_floating)) return false;
+    Instance* self = inst(plugin);
+    self->ensureUi();
+    self->floating = is_floating;
+    if (is_floating) return self->window->create(0);
+    return true; // the window is created once the host gives us a parent
+}
+static void gui_destroy(const clap_plugin_t* plugin) {
+    Instance* self = inst(plugin);
+    if (self->window) self->window->destroy();
+}
+static bool gui_set_scale(const clap_plugin_t*, double) { return false; }
+static bool gui_get_size(const clap_plugin_t* plugin, uint32_t* w, uint32_t* h) {
+    Instance* self = inst(plugin);
+    self->ensureUi();
+    self->window->pixelSize(*w, *h);
+    return true;
+}
+static bool gui_can_resize(const clap_plugin_t*) { return false; }
+static bool gui_get_resize_hints(const clap_plugin_t*, clap_gui_resize_hints_t*) { return false; }
+static bool gui_adjust_size(const clap_plugin_t* plugin, uint32_t* w, uint32_t* h) {
+    return gui_get_size(plugin, w, h);
+}
+static bool gui_set_size(const clap_plugin_t*, uint32_t, uint32_t) { return true; }
+static bool gui_set_parent(const clap_plugin_t* plugin, const clap_window_t* window) {
+    Instance* self = inst(plugin);
+    if (!window || !self->window) return false;
+#if defined(_WIN32)
+    return self->window->create(reinterpret_cast<uintptr_t>(window->win32));
+#elif defined(__linux__)
+    return self->window->create(static_cast<uintptr_t>(window->x11));
+#else
+    return false;
+#endif
+}
+static bool gui_set_transient(const clap_plugin_t*, const clap_window_t*) { return false; }
+static void gui_suggest_title(const clap_plugin_t*, const char*) {}
+static bool gui_show(const clap_plugin_t* plugin) {
+    Instance* self = inst(plugin);
+    if (!self->window) return false;
+    self->window->show();
+    return true;
+}
+static bool gui_hide(const clap_plugin_t* plugin) {
+    Instance* self = inst(plugin);
+    if (!self->window) return false;
+    self->window->hide();
+    return true;
+}
+
+static const clap_plugin_gui_t s_gui_extension = {
+    .is_api_supported = gui_is_api_supported,
+    .get_preferred_api = gui_get_preferred_api,
+    .create = gui_create,
+    .destroy = gui_destroy,
+    .set_scale = gui_set_scale,
+    .get_size = gui_get_size,
+    .can_resize = gui_can_resize,
+    .get_resize_hints = gui_get_resize_hints,
+    .adjust_size = gui_adjust_size,
+    .set_size = gui_set_size,
+    .set_parent = gui_set_parent,
+    .set_transient = gui_set_transient,
+    .suggest_title = gui_suggest_title,
+    .show = gui_show,
+    .hide = gui_hide,
 };
 
 static const clap_plugin_descriptor_t s_paulascape_desc = {
@@ -128,6 +238,7 @@ static bool clap_plugin_init(const struct clap_plugin* plugin) {
 static void clap_plugin_destroy(const struct clap_plugin* plugin) {
     auto* self = static_cast<paulascape::PaulascapePlugin*>(plugin->plugin_data);
     self->destroy();
+    if (auto* i = static_cast<Instance*>(self); i->window) i->window->destroy();
     delete self;
     delete plugin;
 }
@@ -167,6 +278,7 @@ static const void* clap_plugin_get_extension(const struct clap_plugin* plugin, c
     if (std::strcmp(id, CLAP_EXT_STATE) == 0) return &s_state_extension;
     if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports_extension;
     if (std::strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &s_note_ports_extension;
+    if (std::strcmp(id, CLAP_EXT_GUI) == 0 && paulascape::GuiWindow::isSupported()) return &s_gui_extension;
     return nullptr;
 }
 
@@ -177,7 +289,7 @@ static const clap_plugin_t* clap_create_plugin(const clap_plugin_factory_t* fact
     if (!clap_version_is_compatible(host->clap_version)) return nullptr;
     if (std::strcmp(plugin_id, s_paulascape_desc.id) != 0) return nullptr;
 
-    auto* impl = new paulascape::PaulascapePlugin(host);
+    auto* impl = static_cast<paulascape::PaulascapePlugin*>(new Instance(host));
     auto* plugin = new clap_plugin_t();
 
     plugin->desc = &s_paulascape_desc;
