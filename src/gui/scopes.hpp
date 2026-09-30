@@ -1,7 +1,9 @@
 #pragma once
 
 #include "framebuffer.hpp"
+#include "clap/paulascape_plugin.hpp"
 #include <array>
+#include <vector>
 
 namespace paulascape {
 
@@ -9,6 +11,7 @@ class Scopes {
 public:
     Scopes();
     void updateSample(size_t ch, float sample);
+    void pull(const ScopeTap& tap);
     void draw(Framebuffer& fb, int x, int y, int w, int h);
 
 private:

@@ -6,7 +6,7 @@ namespace paulascape {
 
 Scopes::Scopes() {
     for (size_t c = 0; c < 4; ++c) {
-        history[c].resize(120, 0.0f);
+        history[c].resize(150, 0.0f);
     }
 }
 
@@ -14,6 +14,19 @@ void Scopes::updateSample(size_t ch, float sample) {
     ch &= 3;
     history[ch][writeIdx[ch]] = sample;
     writeIdx[ch] = (writeIdx[ch] + 1) % history[ch].size();
+}
+
+void Scopes::pull(const ScopeTap& tap) {
+    const uint32_t w = tap.writeIndex.load(std::memory_order_acquire);
+    const size_t n = history[0].size();
+    for (size_t c = 0; c < 4; ++c) {
+        for (size_t i = 0; i < n; ++i) {
+            // oldest first, ending at the newest sample
+            const uint32_t src = w - static_cast<uint32_t>(n) + static_cast<uint32_t>(i);
+            history[c][i] = tap.data[c][src % ScopeTap::SIZE];
+        }
+        writeIdx[c] = 0;
+    }
 }
 
 void Scopes::draw(Framebuffer& fb, int x, int y, int w, int h) {

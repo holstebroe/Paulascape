@@ -10,6 +10,8 @@ enum class FilterModel {
     Off
 };
 
+// Amiga output filters as modelled in pt2-clone (BSD-3-Clause): 1-pole RC low-pass (A500 only),
+// 1-pole RC high-pass, and the 2-pole Sallen-Key "LED" low-pass. One instance filters one mono bus.
 class RcFilters {
 public:
     RcFilters();
@@ -25,16 +27,13 @@ private:
     FilterModel model = FilterModel::A500;
     bool ledFilterOn = false;
 
-    // Filter states
-    double lowPassState1 = 0.0;
-    double lowPassState2 = 0.0;
-    double highPassState = 0.0;
-    double prevInput = 0.0;
+    bool useLowpass = true;
+    float loA0 = 0, loB1 = 0, loState = 0;
+    float hiA0 = 0, hiB1 = 0, hiState = 0;
+    float ledA1 = 0, ledA2 = 0, ledB1 = 0, ledB2 = 0;
+    float ledState[4] = {};
 
     void updateCoefficients();
-    double a0_lp1 = 0.0, b1_lp1 = 0.0;
-    double a0_lp2 = 0.0, b1_lp2 = 0.0;
-    double a0_hp  = 0.0, b1_hp  = 0.0;
 };
 
 } // namespace paulascape
