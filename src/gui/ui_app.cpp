@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <filesystem>
 
 namespace paulascape {
 
@@ -28,7 +29,7 @@ const char* NOTE_NAMES[12] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G
 
 std::string noteName(int key) {
     key = std::clamp(key, 0, 127);
-    return std::string(NOTE_NAMES[key % 12]) + std::to_string(key / 12 - 2);
+    return std::string(NOTE_NAMES[key % 12]) + std::to_string(key / 12 - 1);
 }
 
 std::string padRight(std::string s, size_t n) {
@@ -71,8 +72,9 @@ bool inside(const UiApp*, int x, int y, int rx, int ry, int rw, int rh) {
 
 UiApp::UiApp(PaulascapePlugin& plugin) : plugin(plugin) {}
 
-void UiApp::addHit(int x, int y, int w, int h, std::function<void(int, bool)> action, std::function<void(int)> wheel) {
-    hits.push_back({x, y, w, h, std::move(action), std::move(wheel)});
+void UiApp::addHit(int x, int y, int w, int h, std::function<void(int, bool)> action, std::function<void(int)> wheel,
+                   std::function<void()> release) {
+    hits.push_back({x, y, w, h, std::move(action), std::move(wheel), std::move(release)});
 }
 
 void UiApp::button(Framebuffer& fb, int x, int y, int w, int h, const std::string& label, bool active,
@@ -131,8 +133,30 @@ void UiApp::exportMidiDialog(bool notes) {
     status = ok ? (notes ? "Exported MIDI notes" : "Exported pattern clip") : "MIDI export failed";
 }
 
+std::string UiApp::exportTempMidi(bool notes) {
+    namespace fs = std::filesystem;
+    std::string base;
+    for (char c : snap.title) base.push_back(std::isalnum(static_cast<unsigned char>(c)) ? c : '_');
+    if (base.empty()) base = "Paulascape";
+    std::error_code ec;
+    const fs::path dir = fs::temp_directory_path(ec) / "Paulascape";
+    fs::create_directories(dir, ec);
+    const fs::path path = dir / (base + (notes ? "_notes.mid" : "_patterns.mid"));
+    const bool ok = notes ? plugin.exportMidi(path.string(), -1) : plugin.exportPatternClip(path.string());
+    return ok ? path.string() : std::string();
+}
+
+void UiApp::previewSlot(uint8_t slot, bool on) {
+    const int sub = static_cast<int>(snap.params[PARAM_SUB_MODE]);
+    // Multi-channel slot n listens on MIDI channel n-1; drum slots on their in key; otherwise the root key.
+    uint8_t channel = 0, key = 60;
+    if (sub == 1) channel = static_cast<uint8_t>(slot - 1);
+    if (sub == 2) key = snap.slots[slot].inKey;
+    plugin.guiNote(channel, key, on);
+}
+
 void UiApp::render(Framebuffer& fb) {
-    snap = plugin.snapshot();
+    snap = plugin.snapshot(WIDTH - 20);
     hits.clear();
     clampScroll();
     if (fb.getWidth() != WIDTH || fb.getHeight() != HEIGHT) fb.resize(WIDTH, HEIGHT);
@@ -156,8 +180,15 @@ void UiApp::drawFront(Framebuffer& fb) {
         plugin.setParamFromGui(PARAM_PLAYBACK_MODE, 1);
     });
     button(fb, 432, 4, 72, 18, "Open MOD", false, [this](int, bool) { loadModDialog(); });
-    button(fb, 508, 4, 40, 18, "MIDI", false, [this](int, bool) { exportMidiDialog(false); });
-    button(fb, 550, 4, 48, 18, "Notes", false, [this](int, bool) { exportMidiDialog(true); });
+    // Drag these onto a DAW track. Right-click saves a file instead.
+    button(fb, 508, 4, 40, 18, "MIDI", false, [this](int b, bool) {
+        if (b == 3) exportMidiDialog(false); else dragPending = {true, false, lastX, lastY};
+        status = "Drag onto a DAW track: pattern clip. Right-click saves a file";
+    });
+    button(fb, 550, 4, 48, 18, "Notes", false, [this](int b, bool) {
+        if (b == 3) exportMidiDialog(true); else dragPending = {true, true, lastX, lastY};
+        status = "Drag onto a DAW track: notes and effects. Right-click saves a file";
+    });
     button(fb, 600, 4, 36, 18, "", false, [this](int, bool) { screen = Screen::Settings; });
     gear(fb, 614, 9, COL_TEXT);
 
@@ -181,6 +212,8 @@ void UiApp::drawFront(Framebuffer& fb) {
     // Hint / status
     const std::string hint = status.empty() ? "L-click +, R-click -, Shift = big step, wheel scrolls" : status;
     text(fb, 8, MATRIX_Y + ROW_H * visibleRows() + 10, padRight(hint, 76), status.empty() ? COL_DIM : COL_TEXT);
+
+    drawWavePanel(fb);
 
     // Scopes
     scopes.pull(plugin.scopeTap());
@@ -232,7 +265,10 @@ void UiApp::drawSampleMatrix(Framebuffer& fb) {
         const int h = ROW_H;
         const uint8_t u = static_cast<uint8_t>(slot);
         auto step = [](int button, bool shift, int big) { return (button == 3 ? -1 : 1) * (shift ? big : 1); };
-        addHit(6, y - 1, 204, h, [this, u](int, bool) { plugin.selectSlot(u); });
+        addHit(6, y - 1, 204, h, [this, u](int b, bool) {
+            plugin.selectSlot(u);
+            if (b == 1) previewSlot(u, true); // plays while the mouse button is held
+        }, {}, [this, u]() { previewSlot(u, false); });
         addHit(212, y - 1, 24, h, [this, u](int, bool) { plugin.adjustSlot(u, SlotField::Loop, 0); });
         addHit(238, y - 1, 32, h, [this, u, step](int b, bool sh) { plugin.adjustSlot(u, SlotField::Volume, step(b, sh, 8)); },
                [this, u](int d) { plugin.adjustSlot(u, SlotField::Volume, d); });
@@ -264,7 +300,7 @@ void UiApp::drawPatternList(Framebuffer& fb) {
     const int songKey = static_cast<int>(snap.params[PARAM_SONG_ORDER_KEY]);
 
     bevel(fb, 4, 48, fb.getWidth() - 8, 12, false, COL_PANEL);
-    text(fb, 8, 50, "Key   Pattern  Used in song order positions", COL_TEXT);
+    text(fb, 8, 50, "Key   Pattern  Used at song order positions (hold to play)", COL_TEXT);
     bevel(fb, 4, MATRIX_Y - 1, fb.getWidth() - 8, listH + 2, true, COL_LCD_BG);
     addHit(4, MATRIX_Y - 1, fb.getWidth() - 8, listH + 2, nullptr, [this](int d) { scroll -= d * 3; clampScroll(); });
 
@@ -278,8 +314,13 @@ void UiApp::drawPatternList(Framebuffer& fb) {
         if (playing) fb.fillRect(6, y - 1, fb.getWidth() - 12, ROW_H, COL_SEL_BG);
         const uint32_t fg = playing ? COL_SEL_TEXT : COL_LCD_TEXT;
 
+        const int key = song ? songKey : base + pat;
+        if (key >= 0 && key <= 127) {
+            addHit(6, y - 1, fb.getWidth() - 24, ROW_H, [this, key](int b, bool) { if (b == 1) plugin.guiNote(0, static_cast<uint8_t>(key), true); },
+                   {}, [this, key]() { plugin.guiNote(0, static_cast<uint8_t>(key), false); });
+        }
         if (song) {
-            text(fb, 8, y, padRight(noteName(songKey), 6) + "SONG     plays the whole song from order 0", fg);
+            text(fb, 8, y, padRight(noteName(songKey), 6) + "SONG     whole song: order list, jumps and breaks", fg);
             continue;
         }
         char head[32];
@@ -290,6 +331,40 @@ void UiApp::drawPatternList(Framebuffer& fb) {
         text(fb, 8, y, head + (used.empty() ? std::string("-") : used), fg);
     }
     if (snap.numPatterns == 0) text(fb, 8, MATRIX_Y + 12, "No patterns: open a MOD file", COL_DIM);
+}
+
+void UiApp::drawWavePanel(Framebuffer& fb) {
+    const int x0 = 8, y0 = 184, w = WIDTH - 20, h = 72;
+    const SlotView& sv = snap.slots[snap.selectedSlot];
+    bevel(fb, x0 - 2, y0 - 2, w + 4, h + 4, true, COL_LCD_BG);
+
+    char head[96];
+    if (sv.length == 0) {
+        std::snprintf(head, sizeof(head), "%02d  (empty slot)", snap.selectedSlot);
+    } else if (sv.loopEnd > 0) {
+        std::snprintf(head, sizeof(head), "%02d  %s  %u bytes  loop %u-%u", snap.selectedSlot, sv.name.substr(0, 22).c_str(), sv.length, sv.loopStart, sv.loopEnd);
+    } else {
+        std::snprintf(head, sizeof(head), "%02d  %s  %u bytes  no loop", snap.selectedSlot, sv.name.substr(0, 22).c_str(), sv.length);
+    }
+    text(fb, x0 + 2, y0 + 1, head, COL_LCD_TEXT);
+
+    const int top = y0 + 11, areaH = h - 12, mid = top + areaH / 2;
+    if (sv.length == 0 || snap.waveMin.size() < static_cast<size_t>(w)) return;
+
+    // loop region
+    if (sv.loopEnd > 0) {
+        const int lx0 = x0 + static_cast<int>(static_cast<uint64_t>(sv.loopStart) * w / sv.length);
+        const int lx1 = x0 + static_cast<int>(static_cast<uint64_t>(sv.loopEnd) * w / sv.length);
+        fb.fillRect(lx0, top, std::max(1, lx1 - lx0), areaH, 0xFF2A3A2A);
+        fb.fillRect(lx0, top, 1, areaH, 0xFFFFFF00);
+        fb.fillRect(std::min(lx1, x0 + w - 1), top, 1, areaH, 0xFFFFFF00);
+    }
+    fb.fillRect(x0, mid, w, 1, 0xFF444466);
+    for (int x = 0; x < w; ++x) {
+        const int yHi = mid - snap.waveMax[x] * (areaH / 2 - 1) / 127;
+        const int yLo = mid - snap.waveMin[x] * (areaH / 2 - 1) / 128;
+        fb.fillRect(x0 + x, std::min(yHi, yLo), 1, std::abs(yLo - yHi) + 1, 0xFF66DD66);
+    }
 }
 
 void UiApp::drawSettings(Framebuffer& fb) {
@@ -359,12 +434,36 @@ void UiApp::drawMidiMap(Framebuffer& fb) {
 }
 
 void UiApp::onMouseDown(int x, int y, int button, bool shift) {
+    lastX = x;
+    lastY = y;
+    pressedRelease = nullptr;
     for (auto it = hits.rbegin(); it != hits.rend(); ++it) {
         if (it->action && inside(this, x, y, it->x, it->y, it->w, it->h)) {
+            if (button == 1) pressedRelease = it->release;
             it->action(button, shift);
             return;
         }
     }
+}
+
+void UiApp::onMouseUp(int, int, int button) {
+    dragPending.active = false;
+    if (button == 1 && pressedRelease) {
+        auto f = std::move(pressedRelease);
+        pressedRelease = nullptr;
+        f();
+    }
+}
+
+void UiApp::onMouseMove(int x, int y) {
+    lastX = x;
+    lastY = y;
+    if (!dragPending.active) return;
+    if (std::abs(x - dragPending.x) < 4 && std::abs(y - dragPending.y) < 4) return;
+    dragPending.active = false;
+    const std::string path = exportTempMidi(dragPending.notes);
+    if (path.empty()) status = "MIDI export failed";
+    else if (!onDragFile || !onDragFile(path)) status = "Dragging files is not supported here; right-click to save a file";
 }
 
 void UiApp::onWheel(int x, int y, int delta) {

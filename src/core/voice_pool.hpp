@@ -158,7 +158,6 @@ private:
 
     uint8_t selectedSlot = 1;
     std::array<uint8_t, 16> channelProgram{}; // sample slot chosen by MIDI program change, 0 = use selectedSlot
-    uint8_t nextAmigaChannel = 0;
     uint32_t globalAge = 0;
     double samplesPerTick = 918.75;
     double tickCounter = 0.0;

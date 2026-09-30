@@ -1,6 +1,8 @@
 #include "clap/paulascape_plugin.hpp"
 #include <iostream>
 #include <cassert>
+#include <cstdio>
+#include <filesystem>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -56,6 +58,25 @@ int main() {
     float peak = 0;
     for (float v : l) peak = std::max(peak, std::fabs(v));
     assert(peak > 0.01f);
+
+    // Importing a WAV names the slot after the file
+    {
+        const auto dir = std::filesystem::temp_directory_path() / "paulascape_test";
+        std::filesystem::create_directories(dir);
+        const auto wav = dir / "My Bass Drum Sample Long Name.wav";
+        std::vector<uint8_t> w(44 + 2000);
+        auto put32 = [&](size_t o, uint32_t v) { for (int i = 0; i < 4; ++i) w[o + i] = uint8_t(v >> (8 * i)); };
+        auto put16 = [&](size_t o, uint16_t v) { w[o] = uint8_t(v); w[o + 1] = uint8_t(v >> 8); };
+        std::memcpy(&w[0], "RIFF", 4); put32(4, 36 + 2000); std::memcpy(&w[8], "WAVEfmt ", 8); put32(16, 16);
+        put16(20, 1); put16(22, 1); put32(24, 22050); put32(28, 44100); put16(32, 2); put16(34, 16);
+        std::memcpy(&w[36], "data", 4); put32(40, 2000);
+        for (int i = 0; i < 1000; ++i) put16(44 + 2 * i, uint16_t(int16_t(10000 * std::sin(i * 0.3))));
+        FILE* f = std::fopen(wav.string().c_str(), "wb");
+        std::fwrite(w.data(), 1, w.size(), f);
+        std::fclose(f);
+        assert(plugin.importWavToSlot(5, wav.string()));
+        assert(plugin.snapshot().slots[5].name == "My Bass Drum Sample Lo"); // 22 characters
+    }
 
     plugin.setParamFromGui(paulascape::PARAM_FILTER_MODEL, 1);
     plugin.adjustSlot(slot, paulascape::SlotField::Volume, -10);

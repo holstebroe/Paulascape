@@ -88,27 +88,41 @@ void testModes() {
     (void)sum;
 }
 
-void testRoundRobinAndFourMono() {
+void testChannelAllocationAndFourMono() {
     Rig rig;
     rig.pool.setOutputLayout(OutputLayout::FourMono);
     rig.pool.setFilterModel(FilterModel::Off);
     std::vector<float> o[4];
     float* out[4];
-    for (int c = 0; c < 4; ++c) { o[c].assign(64, 0.f); out[c] = o[c].data(); }
-    // Four notes, one at a time, each lands on the next output
-    for (int n = 0; n < 4; ++n) {
-        rig.pool.allNotesOff();
-        // the allocator keeps counting across notes: note n goes to output n
-        for (int k = 0; k < 4; ++k) { o[k].assign(64, 0.f); }
-        rig.pool.noteOn(0, 60, 127);
+    auto render = [&]() {
+        for (int c = 0; c < 4; ++c) { o[c].assign(64, 0.f); out[c] = o[c].data(); }
         rig.pool.processAudio(out, 4, 64);
-        int loud = -1;
+    };
+    auto loudOutputs = [&]() {
+        std::vector<int> loud;
         for (int c = 0; c < 4; ++c) {
             float e = 0;
             for (float v : o[c]) e += std::fabs(v);
-            if (e > 0.01f) { assert(loud == -1); loud = c; }
+            if (e > 0.01f) loud.push_back(c);
         }
-        assert(loud == n);
+        return loud;
+    };
+
+    // Notes that do not overlap stay on the same channel
+    for (int n = 0; n < 4; ++n) {
+        rig.pool.noteOn(0, 60, 127);
+        render();
+        assert(loudOutputs() == std::vector<int>{0});
+        rig.pool.noteOff(0, 60);
+    }
+
+    // Overlapping notes spread over the channels in turn
+    rig.pool.allNotesOff();
+    for (int n = 0; n < 4; ++n) {
+        rig.pool.noteOn(0, static_cast<uint8_t>(60 + n), 127);
+        render();
+        const auto loud = loudOutputs();
+        assert(!loud.empty() && loud.back() == n);
     }
 }
 
@@ -266,7 +280,7 @@ void testSampleOffset() {
 int main() {
     std::cout << "Testing VoicePool..." << std::endl;
     testModes();
-    testRoundRobinAndFourMono();
+    testChannelAllocationAndFourMono();
     testNoteOffAndFade();
     testPolyphonyAndStealing();
     testPitch();

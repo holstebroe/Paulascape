@@ -1,6 +1,7 @@
 #include "gui/ui_app.hpp"
 #include <cassert>
 #include <cstdio>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -35,9 +36,47 @@ int main(int argc, char** argv) {
     assert(fb.getWidth() == 640 && fb.getHeight() == 400);
     if (!outDir.empty()) dump(fb, outDir + "/front_single.ppm");
 
-    // Click slot 3's name: selects it.
+    // Click slot 3's name: selects it and plays it for as long as the mouse is held
     ui.onMouseDown(60, 62 + 2 * 10 + 3, 1, false);
     assert(plugin.snapshot().selectedSlot == 3);
+    plugin.flush(nullptr, nullptr);
+    assert(plugin.getVoicePool().activeVoiceCount() == 1);
+    ui.onMouseUp(60, 62 + 2 * 10 + 3, 1);
+    plugin.flush(nullptr, nullptr);
+    assert(plugin.getVoicePool().activeVoiceCount() == 0);
+
+    // The wave panel describes the selected sample (slot 3 of BEDROCK loops)
+    {
+        const auto snap3 = plugin.snapshot(620);
+        assert(snap3.waveMin.size() == 620 && snap3.slots[3].loopEnd > snap3.slots[3].loopStart);
+        bool any = false;
+        for (size_t i = 0; i < 620; ++i) any = any || snap3.waveMax[i] != snap3.waveMin[i];
+        assert(any);
+    }
+    ui.render(fb);
+    if (!outDir.empty()) dump(fb, outDir + "/front_wave.ppm");
+
+    // Dragging the MIDI button out: nothing happens on a plain click, a drag exports a file and starts the OS drag
+    {
+        std::string dragged;
+        ui.onDragFile = [&](const std::string& path) { dragged = path; return true; };
+        ui.onMouseDown(520, 12, 1, false);
+        ui.onMouseUp(520, 12, 1);
+        assert(dragged.empty());
+        ui.onMouseDown(520, 12, 1, false);
+        ui.onMouseMove(523, 12);
+        assert(dragged.empty()); // not far enough yet
+        ui.onMouseMove(540, 20);
+        assert(dragged.size() > 4 && dragged.substr(dragged.size() - 4) == ".mid");
+        assert(std::filesystem::exists(dragged) && std::filesystem::file_size(dragged) > 50);
+        ui.onMouseUp(540, 20, 1);
+        dragged.clear();
+        ui.onMouseDown(570, 12, 1, false); // Notes
+        ui.onMouseMove(600, 30);
+        assert(dragged.find("_notes.mid") != std::string::npos);
+        ui.onMouseUp(600, 30, 1);
+        ui.onDragFile = nullptr;
+    }
 
     // Volume cell left-click increments (or stays at 64), right-click decrements.
     const int before = plugin.snapshot().slots[3].volume;
@@ -67,6 +106,20 @@ int main(int argc, char** argv) {
     // Pattern mode
     ui.onMouseDown(360, 12, 1, false);
     assert(plugin.snapshot().params[paulascape::PARAM_PLAYBACK_MODE] == 1.0);
+    ui.render(fb);
+    // Holding a pattern row plays that pattern; the first row is the whole song
+    ui.onMouseDown(40, 62 + 10 + 3, 1, false);
+    plugin.flush(nullptr, nullptr);
+    assert(plugin.getReplayer().isPlaying() && plugin.getReplayer().getCurrentPattern() == 0);
+    ui.onMouseUp(40, 75, 1);
+    plugin.flush(nullptr, nullptr);
+    assert(!plugin.getReplayer().isPlaying());
+    ui.onMouseDown(40, 62 + 3, 1, false);
+    plugin.flush(nullptr, nullptr);
+    assert(plugin.getReplayer().isPlaying());
+    ui.onMouseUp(40, 65, 1);
+    plugin.flush(nullptr, nullptr);
+    assert(!plugin.getReplayer().isPlaying());
     ui.render(fb);
     if (!outDir.empty()) dump(fb, outDir + "/front_pattern.ppm");
 

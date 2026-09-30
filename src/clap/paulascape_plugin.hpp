@@ -52,6 +52,8 @@ struct SlotView {
     bool legato = false;
     uint8_t inKey = 60;
     uint8_t outKey = 60;
+    uint32_t loopStart = 0;
+    uint32_t loopEnd = 0; // bytes, 0 when not looped
 };
 
 // Everything the GUI needs, copied under the state lock so drawing never blocks audio.
@@ -63,6 +65,7 @@ struct UiSnapshot {
     std::array<uint8_t, 128> orderList{};
     std::array<double, PARAM_COUNT> params{};
     uint8_t selectedSlot = 1;
+    std::vector<int8_t> waveMin, waveMax; // selected sample, one entry per requested pixel column
     int playingPattern = -1;
     int playingRow = 0;
 };
@@ -97,7 +100,9 @@ public:
     bool stateLoad(const clap_istream_t* stream);
 
     // GUI-facing API (main thread). Each call takes the state lock briefly.
-    UiSnapshot snapshot();
+    UiSnapshot snapshot(int waveWidth = 0);
+    // Preview keys pressed in the GUI (held while the mouse is down); played by the audio thread
+    void guiNote(uint8_t channel, uint8_t key, bool on);
     void setParamFromGui(clap_id paramId, double value);
     bool loadModFile(const std::string& path);
     bool loadModMemory(const uint8_t* data, size_t size);
@@ -142,6 +147,9 @@ private:
     uint8_t selectedSlot = 1;
     ScopeTap scope;
 
+    struct GuiNote { uint8_t channel, key; bool on; };
+    std::vector<GuiNote> guiNoteQueue;   // guarded by guiQueueMutex
+    void drainGuiNotes();                // caller holds stateMutex
     std::mutex guiQueueMutex;
     std::vector<std::pair<clap_id, double>> guiParamQueue; // GUI changes to report to the host
 

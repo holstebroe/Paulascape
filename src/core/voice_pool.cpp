@@ -359,8 +359,17 @@ void VoicePool::noteOn(uint8_t midiChannel, uint8_t key, uint8_t velocity) {
     slot.midiKey = key;
     slot.midiChannel = midiChannel;
     slot.sampleSlot = sampleSlot;
-    slot.amigaChannel = nextAmigaChannel;
-    nextAmigaChannel = (nextAmigaChannel + 1) % 4; // round-robin Amiga channels 0..3
+    // A note that does not overlap another stays on the first channel; overlapping notes spread to the next
+    // free channel (least loaded, lowest number first).
+    {
+        int load[4] = {0, 0, 0, 0};
+        for (size_t i = 0; i < MAX_VOICES; ++i) {
+            if (static_cast<int>(i) != slotIdx && voices[i].voice.isActive()) ++load[voices[i].amigaChannel & 3];
+        }
+        int best = 0;
+        for (int c = 1; c < 4; ++c) if (load[c] < load[best]) best = c;
+        slot.amigaChannel = static_cast<uint8_t>(best);
+    }
     slot.age = ++globalAge;
     slot.held = true;
     slot.releasing = false;

@@ -42,7 +42,7 @@ const ParamDesc PARAM_DESCS[PARAM_COUNT] = {
 const char* NOTE_NAMES[12] = {"C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-"};
 
 std::string noteName(int key) {
-    return std::string(NOTE_NAMES[key % 12]) + std::to_string(key / 12 - 2);
+    return std::string(NOTE_NAMES[key % 12]) + std::to_string(key / 12 - 1);
 }
 
 const char* enumText(clap_id id, int v) {
@@ -286,6 +286,22 @@ void PaulascapePlugin::renderRange(float** out, uint32_t numCh, uint32_t from, u
     }
 }
 
+void PaulascapePlugin::guiNote(uint8_t channel, uint8_t key, bool on) {
+    std::lock_guard<std::mutex> lock(guiQueueMutex);
+    guiNoteQueue.push_back({channel, key, on});
+}
+
+void PaulascapePlugin::drainGuiNotes() {
+    std::vector<GuiNote> notes;
+    {
+        std::lock_guard<std::mutex> lock(guiQueueMutex);
+        notes.swap(guiNoteQueue);
+    }
+    for (const auto& n : notes) {
+        if (n.on) handleNoteOn(n.channel, n.key, 100); else handleNoteOff(n.channel, n.key);
+    }
+}
+
 void PaulascapePlugin::drainGuiQueue(const clap_output_events_t* out) {
     std::vector<std::pair<clap_id, double>> pending;
     {
@@ -340,6 +356,8 @@ clap_process_status PaulascapePlugin::process(const clap_process_t* proc) {
         }
     }
 
+    drainGuiNotes();
+
     // Sample-accurate: render up to each event, then apply it.
     uint32_t pos = 0;
     const uint32_t numEvents = proc->in_events ? proc->in_events->size(proc->in_events) : 0;
@@ -361,6 +379,7 @@ clap_process_status PaulascapePlugin::process(const clap_process_t* proc) {
 void PaulascapePlugin::flush(const clap_input_events_t* in, const clap_output_events_t* out) {
     {
         std::lock_guard<std::mutex> lock(stateMutex);
+        drainGuiNotes();
         const uint32_t n = in ? in->size(in) : 0;
         for (uint32_t i = 0; i < n; ++i) handleEvent(in->get(in, i));
     }
@@ -503,7 +522,7 @@ bool PaulascapePlugin::stateLoad(const clap_istream_t* stream) {
 
 // ---- GUI-facing API ----
 
-UiSnapshot PaulascapePlugin::snapshot() {
+UiSnapshot PaulascapePlugin::snapshot(int waveWidth) {
     UiSnapshot s;
     std::lock_guard<std::mutex> lock(stateMutex);
     s.title = currentModule.title;
@@ -518,6 +537,25 @@ UiSnapshot PaulascapePlugin::snapshot() {
         v.legato = h.legato;
         v.inKey = h.inKey;
         v.outKey = h.outKey;
+        const uint32_t len = static_cast<uint32_t>(std::min<size_t>(h.length, currentModule.samples[i].pcmData.size()));
+        if (h.loopEnabled && h.loopLength > 2 && h.loopStart < len) {
+            v.loopStart = h.loopStart;
+            v.loopEnd = std::min<uint32_t>(h.loopStart + h.loopLength, len);
+        }
+    }
+    if (waveWidth > 0) {
+        const auto& pcm = currentModule.samples[selectedSlot].pcmData;
+        const size_t n = std::min<size_t>(currentModule.samples[selectedSlot].header.length, pcm.size());
+        s.waveMin.assign(waveWidth, 0);
+        s.waveMax.assign(waveWidth, 0);
+        for (int x = 0; x < waveWidth && n > 0; ++x) {
+            const size_t a = n * x / waveWidth;
+            const size_t b = std::max(a + 1, n * (x + 1) / waveWidth);
+            int8_t lo = 127, hi = -128;
+            for (size_t k = a; k < b && k < n; ++k) { lo = std::min(lo, pcm[k]); hi = std::max(hi, pcm[k]); }
+            s.waveMin[x] = lo;
+            s.waveMax[x] = hi;
+        }
     }
     s.songLength = currentModule.songLength;
     s.numPatterns = currentModule.numPatterns;
@@ -584,6 +622,10 @@ bool PaulascapePlugin::importWavToSlot(uint8_t slot, const std::string& path) {
     stopAllAudio();
     ModSampleHeader& dst = currentModule.samples[slot].header;
     // Keep the slot's key mapping and legato flag; everything else comes from the import.
+    std::string name = path.substr(path.find_last_of("/\\") == std::string::npos ? 0 : path.find_last_of("/\\") + 1);
+    if (const auto dot = name.find_last_of('.'); dot != std::string::npos && dot > 0) name.resize(dot);
+    name.resize(std::min<size_t>(name.size(), 22)); // MOD sample names hold 22 characters
+    imported.header.name = name;
     imported.header.legato = dst.legato;
     imported.header.inKey = dst.inKey;
     imported.header.outKey = dst.outKey;
