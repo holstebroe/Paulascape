@@ -3,6 +3,7 @@
 #include "mod_loader.hpp"
 #include "paula_voice.hpp"
 #include "rc_filters.hpp"
+#include "voice_pool.hpp"
 #include <array>
 
 namespace paulascape {
@@ -44,18 +45,25 @@ public:
     void setTempoSyncMode(TempoSyncMode mode);
     void setHostTempo(double bpm);
     void setRowsPerBeat(int rowsPerBeat);
+    void setResamplerMode(ResamplerMode mode);
+    void setFilterModel(FilterModel model);
+    void setLedFilter(bool enable);
+    void setOutputLayout(OutputLayout layout);
+    void setStereoSeparation(float separation);
     void setPatternBaseNote(uint8_t note); // e.g., C1 = 24
     void setSongOrderKey(uint8_t note);     // e.g., C0 = 12
 
     // Pattern Mode key triggers
     void patternNoteOn(uint8_t key);
     void patternNoteOff(uint8_t key);
+    void stop();
 
     void processAudio(float** outputs, uint32_t numChannels, uint32_t numFrames);
 
     bool isPlaying() const { return playing; }
     int getCurrentPattern() const { return currentPattern; }
     int getCurrentRow() const { return currentRow; }
+    float getScopeOutput(size_t ch) const { return scopeOutputs[ch & 3]; }
 
 private:
     const Module* activeModule = nullptr;
@@ -84,6 +92,9 @@ private:
 
     std::array<ReplayerChannelState, 4> channels;
     std::array<RcFilters, 4> filters;
+    OutputLayout outputLayout = OutputLayout::Stereo;
+    float stereoSeparation = 0.20f;
+    std::array<float, 4> scopeOutputs{0.0f, 0.0f, 0.0f, 0.0f};
 
     void calculateTickSamples();
     void tick();

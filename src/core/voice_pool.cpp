@@ -117,7 +117,7 @@ void VoicePool::noteOn(uint8_t midiChannel, uint8_t key, uint8_t velocity) {
 
     switch (playbackMode) {
         case PlaybackMode::Single:
-            sampleSlot = 1; // Primary slot or selected slot
+            sampleSlot = selectedSlot;
             break;
         case PlaybackMode::MultiChannel:
             sampleSlot = std::clamp<uint8_t>(midiChannel + 1, 1, 31);

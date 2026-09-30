@@ -19,6 +19,7 @@ set(PAULASCAPE_CORE_SOURCES
     src/core/pt2/pt2_tables.cpp
     src/core/pt2/pt2_font.cpp
     src/core/mod_loader.cpp
+    src/core/module_io.cpp
     src/core/paula_voice.cpp
     src/core/blep.cpp
     src/core/rc_filters.cpp
@@ -64,6 +65,12 @@ set_target_properties(Paulascape PROPERTIES
 function(add_paulascape_test TEST_NAME TEST_SOURCE)
     add_executable(${TEST_NAME} ${TEST_SOURCE})
     target_link_libraries(${TEST_NAME} PRIVATE paulascape_core paulascape_gui)
+    # Tests use assert(); keep it active in Release builds too.
+    if(MSVC)
+        target_compile_options(${TEST_NAME} PRIVATE /UNDEBUG)
+    else()
+        target_compile_options(${TEST_NAME} PRIVATE -UNDEBUG)
+    endif()
     add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
 endfunction()
 
@@ -75,6 +82,7 @@ add_paulascape_test(replayer_test src/replayer_test_main.cpp)
 add_paulascape_test(wav_import_test src/import/wav_import_test_main.cpp)
 add_paulascape_test(midi_export_test src/export/midi_export_test_main.cpp)
 add_paulascape_test(clap_plugin_test src/clap/clap_plugin_test_main.cpp)
+target_compile_definitions(clap_plugin_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(gui_render_test src/gui/gui_render_test_main.cpp)
 
 # Build the plugin and copy the .clap to the folder in the CLAPTEST environment

@@ -44,10 +44,13 @@ static bool clap_params_value_to_text(const clap_plugin_t* plugin, clap_id param
 }
 
 static bool clap_params_text_to_value(const clap_plugin_t* plugin, clap_id param_id, const char* param_value_text, double* out_value) {
-    return false;
+    auto* self = static_cast<paulascape::PaulascapePlugin*>(plugin->plugin_data);
+    return self->paramsTextToValue(param_id, param_value_text, out_value);
 }
 
 static void clap_params_flush(const clap_plugin_t* plugin, const clap_input_events_t* in, const clap_output_events_t* out) {
+    auto* self = static_cast<paulascape::PaulascapePlugin*>(plugin->plugin_data);
+    self->flush(in, out);
 }
 
 static const clap_plugin_params_t s_params_extension = {

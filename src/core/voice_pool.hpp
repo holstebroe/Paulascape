@@ -49,6 +49,7 @@ public:
     void setStereoSeparation(float separation); // 0.0 .. 1.0 (0 = mono, 1 = hard pan L R R L)
     void setPitchMode(PitchMode mode);
     void setPlaybackMode(PlaybackMode mode);
+    void setSelectedSlot(uint8_t slot) { selectedSlot = slot < 1 ? 1 : (slot > 31 ? 31 : slot); }
 
     // Voice triggers
     void noteOn(uint8_t midiChannel, uint8_t key, uint8_t velocity);
@@ -82,6 +83,7 @@ private:
     std::array<bool, 16> channelLegato{};
     std::array<int, 16> channelPitchBend{};
 
+    uint8_t selectedSlot = 1;
     uint8_t nextAmigaChannel = 0;
     uint32_t globalAge = 0;
 

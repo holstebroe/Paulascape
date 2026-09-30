@@ -48,6 +48,28 @@ void Replayer::setRowsPerBeat(int rpb) {
     calculateTickSamples();
 }
 
+void Replayer::setResamplerMode(ResamplerMode mode) {
+    for (auto& ch : channels) ch.voice.setResamplerMode(mode);
+}
+
+void Replayer::setFilterModel(FilterModel model) {
+    for (auto& f : filters) f.setFilterModel(model);
+}
+
+void Replayer::setLedFilter(bool enable) {
+    for (auto& f : filters) f.setLedFilter(enable);
+}
+
+void Replayer::setOutputLayout(OutputLayout layout) { outputLayout = layout; }
+
+void Replayer::setStereoSeparation(float separation) { stereoSeparation = separation; }
+
+void Replayer::stop() {
+    playing = false;
+    activePatternKey = -1;
+    for (auto& ch : channels) ch.voice.stop();
+}
+
 void Replayer::setPatternBaseNote(uint8_t note) {
     patternBaseNote = note;
 }
@@ -226,10 +248,18 @@ void Replayer::processAudio(float** outputs, uint32_t numChannels, uint32_t numF
             chSamples[c] = filters[c].processSample(chSamples[c]);
         }
 
-        // Hard stereo panning L R R L
-        outputs[0][f] = (chSamples[0] + chSamples[3]) * 0.707f;
-        if (numChannels > 1) {
-            outputs[1][f] = (chSamples[1] + chSamples[2]) * 0.707f;
+        scopeOutputs = chSamples;
+
+        if (outputLayout == OutputLayout::FourMono && numChannels >= 4) {
+            for (size_t c = 0; c < 4; ++c) outputs[c][f] = chSamples[c];
+        } else {
+            // Amiga panning L R R L, softened by the separation setting
+            const float near = 0.5f + 0.5f * stereoSeparation;
+            const float far = 0.5f - 0.5f * stereoSeparation;
+            outputs[0][f] = (chSamples[0] + chSamples[3]) * near + (chSamples[1] + chSamples[2]) * far;
+            if (numChannels > 1) {
+                outputs[1][f] = (chSamples[1] + chSamples[2]) * near + (chSamples[0] + chSamples[3]) * far;
+            }
         }
     }
 }
