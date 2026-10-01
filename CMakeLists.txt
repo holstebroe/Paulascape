@@ -99,6 +99,8 @@ target_compile_definitions(replayer_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CU
 add_paulascape_test(wav_import_test src/import/wav_import_test_main.cpp)
 add_paulascape_test(midi_export_test src/export/midi_export_test_main.cpp)
 target_compile_definitions(midi_export_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
+add_paulascape_test(midi_roundtrip_test src/export/midi_roundtrip_test_main.cpp)
+target_compile_definitions(midi_roundtrip_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(clap_plugin_test src/clap/clap_plugin_test_main.cpp)
 target_compile_definitions(clap_plugin_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(gui_render_test src/gui/gui_render_test_main.cpp)

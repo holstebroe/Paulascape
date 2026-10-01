@@ -2,6 +2,8 @@
 #include "export/song_unroll.hpp"
 #include "core/replayer.hpp"
 #include "core/voice_pool.hpp"
+#include "export/midi_file_reader.hpp"
+#include "core/pt2/pt2_tables.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -12,65 +14,9 @@
 #include <vector>
 
 using namespace paulascape;
+using namespace paulascape::testmidi;
 
 namespace {
-
-struct Ev {
-    uint32_t tick;
-    int track;
-    std::vector<uint8_t> data; // channel message bytes, or {0xFF, type, payload...}
-};
-
-struct Midi {
-    int format = 0, tracks = 0, division = 0;
-    std::vector<Ev> events;
-};
-
-uint32_t be32(const uint8_t* p) { return (p[0] << 24) | (p[1] << 16) | (p[2] << 8) | p[3]; }
-
-Midi parse(const std::vector<uint8_t>& b) {
-    Midi m;
-    assert(b.size() > 14 && std::string(b.begin(), b.begin() + 4) == "MThd");
-    m.format = (b[8] << 8) | b[9];
-    m.tracks = (b[10] << 8) | b[11];
-    m.division = (b[12] << 8) | b[13];
-    size_t pos = 14;
-    for (int t = 0; t < m.tracks; ++t) {
-        assert(std::string(b.begin() + pos, b.begin() + pos + 4) == "MTrk");
-        const uint32_t len = be32(&b[pos + 4]);
-        size_t p = pos + 8;
-        const size_t end = p + len;
-        uint32_t tick = 0;
-        uint8_t running = 0;
-        bool ended = false;
-        while (p < end) {
-            uint32_t delta = 0;
-            while (true) { const uint8_t c = b[p++]; delta = (delta << 7) | (c & 0x7F); if (!(c & 0x80)) break; }
-            tick += delta;
-            uint8_t status = b[p];
-            if (status == 0xFF) {
-                const uint8_t type = b[p + 1];
-                p += 2;
-                uint32_t n = 0;
-                while (true) { const uint8_t c = b[p++]; n = (n << 7) | (c & 0x7F); if (!(c & 0x80)) break; }
-                Ev e{tick, t, {0xFF, type}};
-                e.data.insert(e.data.end(), b.begin() + p, b.begin() + p + n);
-                p += n;
-                if (type == 0x2F) ended = true;
-                m.events.push_back(e);
-            } else {
-                if (status & 0x80) { running = status; ++p; } else status = running;
-                const int args = ((status & 0xF0) == 0xC0 || (status & 0xF0) == 0xD0) ? 1 : 2;
-                Ev e{tick, t, {status}};
-                for (int a = 0; a < args; ++a) e.data.push_back(b[p++]);
-                m.events.push_back(e);
-            }
-        }
-        assert(ended && p == end);
-        pos = end;
-    }
-    return m;
-}
 
 Module makeModule() {
     Module mod;
@@ -145,7 +91,7 @@ void testNoteExport() {
     Module m = makeModule();
     m.patterns[0][0][0] = cell(1, 214);                      // C-3, sample 1
     m.patterns[0][1][0] = cell(2, 226);                      // sample 2 -> program change, velocity from volume 32
-    m.patterns[0][2][0] = cell(0, 190, 0x03, 0x10);          // tone portamento to E-3: legato overlap
+    m.patterns[0][2][0] = cell(0, 190, 0x03, 0x10);          // tone portamento to E-3: pitch bend on the held key
     m.patterns[0][3][0] = cell(0, 0, 0x0E, 0x53);            // E53 finetune -> CC 20 = 21
     m.patterns[0][4][0] = cell(0, 214, 0x0C, 0x10);          // Cxx with note: velocity
     m.patterns[0][5][0] = cell(0, 0, 0x04, 0x46);            // vibrato
@@ -171,31 +117,46 @@ void testNoteExport() {
     assert(pc.size() == 2 && pc[0]->data[1] == 0 && pc[1]->data[1] == 1);
     auto on = select(midi, 1, 0x90);
     auto off = select(midi, 1, 0x80);
-    // Note ons: C-3 (vel 127), D-3(226 -> key 59? B-2) sample 2 vel 64, porta target, Cxx, delayed, ...
-    assert(on.size() >= 5);
+    // Note ons: C-3 (vel 127), B-2 (226) sample 2 vel 64, Cxx, delayed; the tone portamento target is no new note
+    assert(on.size() == 4);
     assert(on[0]->data[1] == 60 && on[0]->data[2] == 127);
     assert(on[1]->data[2] == 64);                            // sample 2 volume 32 of 64
-    // Tone portamento row: CC68 on before the note, note-on without a preceding note-off at that tick
+    // Pitch bend range 48 semitones (RPN 0) at the start of the track
+    auto ccs0 = select(midi, 1, 0xB0);
+    bool rpn = false;
+    for (size_t i = 0; i + 2 < ccs0.size(); ++i)
+        rpn = rpn || (ccs0[i]->data[1] == 101 && ccs0[i]->data[2] == 0 && ccs0[i + 1]->data[1] == 100 && ccs0[i + 1]->data[2] == 0 &&
+                      ccs0[i + 2]->data[1] == 6 && ccs0[i + 2]->data[2] == 48 && ccs0[i]->tick == 0);
+    assert(rpn);
+    // Tone portamento row: B-2 stays held and bends up a tick ahead of each MOD tick (period 226 -> 210 -> 194 -> 190)
     const uint32_t portaTick = 2 * 24;
-    bool legatoOn = false, legatoOff = false, offAtPorta = false;
-    for (const auto& e : midi.events) {
-        if (e.track != 1 || e.data[0] == 0xFF) continue;
-        if ((e.data[0] & 0xF0) == 0xB0 && e.data[1] == 68 && e.tick == portaTick) (e.data[2] >= 64 ? legatoOn : legatoOff) = true;
-        if ((e.data[0] & 0xF0) == 0x80 && e.tick == portaTick) offAtPorta = true;
-    }
-    assert(legatoOn && legatoOff && !offAtPorta);
-    // Cxx 0x10 with a note: velocity 16*127/64 = 32
+    for (const auto* e : on) assert(e->tick != portaTick);
+    for (const auto* e : off) assert(e->tick < portaTick || e->tick > portaTick + 24);
+    std::vector<std::pair<uint32_t, int>> bends;
+    for (const auto* e : select(midi, 1, 0xE0)) bends.push_back({e->tick, e->data[1] | (e->data[2] << 7)});
+    auto bendAt = [&](uint32_t t) { int v = 8192; for (const auto& b : bends) if (b.first <= t) v = b.second; return v; };
+    const auto semis = [](int v) { return (v - 8192) / 8192.0 * 48.0; };
+    assert(bendAt(portaTick) == 8192);
+    assert(std::fabs(semis(bendAt(portaTick + 3)) - 12 * std::log2(226.0 / 210.0)) < 0.02);
+    assert(std::fabs(semis(bendAt(portaTick + 7)) - 12 * std::log2(226.0 / 194.0)) < 0.02);
+    assert(std::fabs(semis(bendAt(portaTick + 11)) - 12 * std::log2(226.0 / 190.0)) < 0.02);
+    // ... and set for the next note (row 4) just before it: the E53 of row 3 stays on the channel in ProTracker,
+    // so C-3 plays at finetune +3 (period 210 instead of 214), which the bend carries
+    const int p210 = pt2::periodTableFinetune[3][24];
+    assert(bendAt(4 * 24 - 2) != bendAt(4 * 24 - 1));
+    assert(std::fabs(semis(bendAt(4 * 24 - 1)) - 12 * std::log2(214.0 / p210)) < 0.02);
+    // Cxx 0x10 with a note: velocity 1 + 16 * 126 / 64 = 33
     bool cxx = false;
-    for (const auto* e : on) if (e->tick == 4 * 24) cxx = e->data[2] == 32;
+    for (const auto* e : on) if (e->tick == 4 * 24) cxx = e->data[2] == 33;
     assert(cxx);
-    // E53: CC20 = 16 + 5, CC22 = 3 (triple in order)
+    // E53: CC20 = 16 + 5, CC22 = 3 (triple in order, a MIDI tick ahead of the row)
     auto ccs = select(midi, 1, 0xB0);
     bool e5 = false, vibr = false, cleared = false, led = false;
     for (size_t i = 0; i + 2 < ccs.size(); ++i) {
         if (ccs[i]->data[1] == 20 && ccs[i + 1]->data[1] == 21 && ccs[i + 2]->data[1] == 22) {
-            if (ccs[i]->data[2] == 21 && ccs[i + 2]->data[2] == 3 && ccs[i]->tick == 3 * 24) e5 = true;
+            if (ccs[i]->data[2] == 21 && ccs[i + 2]->data[2] == 3 && ccs[i]->tick == 3 * 24 - 1) e5 = true;
             if (ccs[i]->data[2] == 4 && ccs[i + 1]->data[2] == 4 && ccs[i + 2]->data[2] == 6) vibr = true;
-            if (ccs[i]->data[2] == 0 && ccs[i + 1]->data[2] == 0 && ccs[i + 2]->data[2] == 0 && ccs[i]->tick == 6 * 24) cleared = true;
+            if (ccs[i]->data[2] == 0 && ccs[i + 1]->data[2] == 0 && ccs[i + 2]->data[2] == 0 && ccs[i]->tick == 6 * 24 - 1) cleared = true;
         }
     }
     for (auto* c : ccs) if (c->data[1] == 74 && c->data[2] == 0) led = true;

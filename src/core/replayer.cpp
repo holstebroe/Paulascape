@@ -269,6 +269,7 @@ void Replayer::triggerCell(size_t chIdx, const NoteCell& cell) {
                     break;
                 case 0xA: ch.volume = static_cast<uint8_t>(std::min<int>(ch.volume + y, 64)); break;
                 case 0xB: ch.volume = static_cast<uint8_t>(std::max<int>(ch.volume - y, 0)); break;
+                case 0xC: if (y == 0) ch.volume = 0; break; // EC0 cuts on tick 0; later ticks in applyTickEffect
                 case 0xE:
                     if (patternDelay == 0) patternDelay = y;
                     break;
