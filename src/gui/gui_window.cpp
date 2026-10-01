@@ -248,7 +248,7 @@ void runLoop(GuiWindow::Impl* impl, UiApp* app) {
                 else if (b == 5) app->onWheel(x, y, -1);
             } else if (ev.type == ButtonRelease) {
                 app->onMouseUp(ev.xbutton.x / s, ev.xbutton.y / s, static_cast<int>(ev.xbutton.button));
-            } else if (ev.type == MotionNotify && (ev.xmotion.state & (Button1Mask | Button3Mask))) {
+            } else if (ev.type == MotionNotify) {
                 app->onMouseMove(ev.xmotion.x / s, ev.xmotion.y / s);
             } else if (ev.type == ClientMessage && static_cast<Atom>(ev.xclient.data.l[0]) == wmDelete) {
                 impl->quit = true;
@@ -456,7 +456,7 @@ LRESULT CALLBACK wndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             impl->app->onMouseUp(GET_X_LPARAM(lp) / impl->scale, GET_Y_LPARAM(lp) / impl->scale, msg == WM_LBUTTONUP ? 1 : 3);
             return 0;
         case WM_MOUSEMOVE:
-            if (wp & (MK_LBUTTON | MK_RBUTTON)) impl->app->onMouseMove(GET_X_LPARAM(lp) / impl->scale, GET_Y_LPARAM(lp) / impl->scale);
+            impl->app->onMouseMove(GET_X_LPARAM(lp) / impl->scale, GET_Y_LPARAM(lp) / impl->scale);
             return 0;
         case WM_LBUTTONDOWN:
         case WM_RBUTTONDOWN:

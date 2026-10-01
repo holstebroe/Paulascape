@@ -61,8 +61,8 @@ int main() {
     XEvent ev{};
     ev.type = ButtonPress;
     ev.xbutton.window = win;
-    ev.xbutton.x = 360;
-    ev.xbutton.y = 12;
+    ev.xbutton.x = 200;
+    ev.xbutton.y = 34;
     ev.xbutton.button = Button1;
     ev.xbutton.same_screen = True;
     XSendEvent(d, win, True, ButtonPressMask, &ev);
@@ -163,7 +163,7 @@ int main() {
         plugin.setParamFromGui(paulascape::PARAM_PLAYBACK_MODE, 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(150));
 
-        send(ButtonPress, 520, 12, 520, 12, 0);
+        send(ButtonPress, 500, 12, 500, 12, 0);
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         send(MotionNotify, 545, 20, 545, 20, Button1Mask);   // far enough: the drag starts
         std::this_thread::sleep_for(std::chrono::milliseconds(150));

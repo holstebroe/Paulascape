@@ -53,7 +53,8 @@ struct SlotView {
     uint8_t inKey = 60;
     uint8_t outKey = 60;
     uint32_t loopStart = 0;
-    uint32_t loopEnd = 0; // bytes, 0 when not looped
+    uint32_t loopEnd = 0; // bytes, 0 when the sample has no loop range
+    bool loopDefined = false; // a loop range exists (it may be switched off)
 };
 
 // Everything the GUI needs, copied under the state lock so drawing never blocks audio.
