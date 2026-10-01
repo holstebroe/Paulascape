@@ -3,6 +3,7 @@
 #include "framebuffer.hpp"
 #include "scopes.hpp"
 #include "clap/paulascape_plugin.hpp"
+#include <chrono>
 #include <functional>
 #include <string>
 #include <vector>
@@ -41,6 +42,7 @@ private:
         std::function<void(int button, bool shift)> action;
         std::function<void(int delta)> wheel;
         std::function<void()> release; // left button released after this hit was pressed
+        std::string hint;              // shown under the scopes while the mouse is over it
     };
 
     PaulascapePlugin& plugin;
@@ -49,6 +51,8 @@ private:
     int scroll = 0;
     int uiScale = 1;
     std::string status;
+    std::string shownStatus;
+    std::chrono::steady_clock::time_point statusTime;
     UiSnapshot snap;
     std::vector<Hit> hits;
     std::function<void()> pressedRelease;
@@ -61,13 +65,15 @@ private:
     void drawSampleMatrix(Framebuffer& fb);
     void drawPatternList(Framebuffer& fb);
     void drawWavePanel(Framebuffer& fb);
+    void drawWave(Framebuffer& fb, const SlotView& sv, int x0, int top, int areaH, int w);
     std::string exportTempMidi(bool notes);
     void previewSlot(uint8_t slot, bool on);
 
     void button(Framebuffer& fb, int x, int y, int w, int h, const std::string& label, bool active,
-                std::function<void(int, bool)> action);
+                std::function<void(int, bool)> action, const std::string& hint = {}, uint32_t labelColor = 0);
     void addHit(int x, int y, int w, int h, std::function<void(int, bool)> action, std::function<void(int)> wheel = {},
-                std::function<void()> release = {});
+                std::function<void()> release = {}, const std::string& hint = {});
+    void drawHintLine(Framebuffer& fb);
     int visibleRows() const { return 10; }
     int totalRows() const;
     void clampScroll();

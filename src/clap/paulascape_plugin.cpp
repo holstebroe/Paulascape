@@ -538,7 +538,8 @@ UiSnapshot PaulascapePlugin::snapshot(int waveWidth) {
         v.inKey = h.inKey;
         v.outKey = h.outKey;
         const uint32_t len = static_cast<uint32_t>(std::min<size_t>(h.length, currentModule.samples[i].pcmData.size()));
-        if (h.loopEnabled && h.loopLength > 2 && h.loopStart < len) {
+        if (h.loopLength > 2 && h.loopStart < len) {
+            v.loopDefined = true;
             v.loopStart = h.loopStart;
             v.loopEnd = std::min<uint32_t>(h.loopStart + h.loopLength, len);
         }

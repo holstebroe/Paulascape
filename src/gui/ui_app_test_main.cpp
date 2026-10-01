@@ -60,18 +60,18 @@ int main(int argc, char** argv) {
     {
         std::string dragged;
         ui.onDragFile = [&](const std::string& path) { dragged = path; return true; };
-        ui.onMouseDown(520, 12, 1, false);
-        ui.onMouseUp(520, 12, 1);
+        ui.onMouseDown(500, 12, 1, false);
+        ui.onMouseUp(500, 12, 1);
         assert(dragged.empty());
-        ui.onMouseDown(520, 12, 1, false);
-        ui.onMouseMove(523, 12);
+        ui.onMouseDown(500, 12, 1, false);
+        ui.onMouseMove(503, 12);
         assert(dragged.empty()); // not far enough yet
         ui.onMouseMove(540, 20);
         assert(dragged.size() > 4 && dragged.substr(dragged.size() - 4) == ".mid");
         assert(std::filesystem::exists(dragged) && std::filesystem::file_size(dragged) > 50);
         ui.onMouseUp(540, 20, 1);
         dragged.clear();
-        ui.onMouseDown(570, 12, 1, false); // Notes
+        ui.onMouseDown(540, 12, 1, false); // NOT
         ui.onMouseMove(600, 30);
         assert(dragged.find("_notes.mid") != std::string::npos);
         ui.onMouseUp(600, 30, 1);
@@ -83,10 +83,20 @@ int main(int argc, char** argv) {
     ui.onMouseDown(250, 62 + 2 * 10 + 3, 3, false);
     assert(plugin.snapshot().slots[3].volume == before - 1);
 
-    // Loop and legato toggles
+    // Loop and legato toggles; a sample without a loop range ignores clicks on its loop cell
+    {
+        const auto before = plugin.snapshot();
+        int noLoop = 0;
+        for (int i = 1; i <= 31 && !noLoop; ++i)
+            if (!before.slots[i].loopDefined) noLoop = i;
+        assert(noLoop > 0 && noLoop < 11);
+        ui.onMouseDown(220, 62 + (noLoop - 1) * 10 + 3, 1, false);
+        assert(plugin.snapshot().slots[noLoop].loop == before.slots[noLoop].loop);
+    }
     const bool loop = plugin.snapshot().slots[3].loop;
     ui.onMouseDown(220, 62 + 2 * 10 + 3, 1, false);
     assert(plugin.snapshot().slots[3].loop == !loop);
+    assert(plugin.snapshot().slots[3].loopDefined); // still defined after switching off
     ui.onMouseDown(315, 62 + 2 * 10 + 3, 1, false);
     assert(plugin.snapshot().slots[3].legato);
 
@@ -103,8 +113,8 @@ int main(int argc, char** argv) {
     ui.onWheel(100, 100, -1);
     ui.render(fb);
 
-    // Pattern mode
-    ui.onMouseDown(360, 12, 1, false);
+    // Pattern is one of the mode buttons next to single, multi and drum
+    ui.onMouseDown(200, 34, 1, false);
     assert(plugin.snapshot().params[paulascape::PARAM_PLAYBACK_MODE] == 1.0);
     ui.render(fb);
     // Holding a pattern row plays that pattern; the first row is the whole song

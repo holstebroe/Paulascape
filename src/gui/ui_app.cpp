@@ -21,6 +21,7 @@ constexpr uint32_t COL_SEL_TEXT = 0xFFFFFFFF;
 constexpr uint32_t COL_DIM = 0xFF666666;
 constexpr uint32_t COL_LCD_BG = 0xFF222233;
 constexpr uint32_t COL_LCD_TEXT = 0xFFCCCCFF;
+constexpr uint32_t COL_GREEN = 0xFF007700; // marks the MIDI drag buttons
 
 constexpr int ROW_H = 10;
 constexpr int MATRIX_Y = 62;
@@ -64,6 +65,14 @@ void gear(Framebuffer& fb, int x, int y, uint32_t color) {
             if (rows[r] & (0x80 >> c)) fb.drawPixel(x + c, y + r, color);
 }
 
+// 8x8 floppy disk glyph for the load buttons
+void floppy(Framebuffer& fb, int x, int y, uint32_t color) {
+    static const uint8_t rows[8] = {0xFE, 0xA5, 0xA5, 0xBD, 0x81, 0xBD, 0xBD, 0xFF};
+    for (int r = 0; r < 8; ++r)
+        for (int c = 0; c < 8; ++c)
+            if (rows[r] & (0x80 >> c)) fb.drawPixel(x + c, y + r, color);
+}
+
 bool inside(const UiApp*, int x, int y, int rx, int ry, int rw, int rh) {
     return x >= rx && y >= ry && x < rx + rw && y < ry + rh;
 }
@@ -73,16 +82,17 @@ bool inside(const UiApp*, int x, int y, int rx, int ry, int rw, int rh) {
 UiApp::UiApp(PaulascapePlugin& plugin) : plugin(plugin) {}
 
 void UiApp::addHit(int x, int y, int w, int h, std::function<void(int, bool)> action, std::function<void(int)> wheel,
-                   std::function<void()> release) {
-    hits.push_back({x, y, w, h, std::move(action), std::move(wheel), std::move(release)});
+                   std::function<void()> release, const std::string& hint) {
+    hits.push_back({x, y, w, h, std::move(action), std::move(wheel), std::move(release), hint});
 }
 
 void UiApp::button(Framebuffer& fb, int x, int y, int w, int h, const std::string& label, bool active,
-                   std::function<void(int, bool)> action) {
+                   std::function<void(int, bool)> action, const std::string& hint, uint32_t labelColor) {
     bevel(fb, x, y, w, h, active, active ? COL_SEL_BG : COL_PANEL);
     const int tx = x + (w - static_cast<int>(label.size()) * 8) / 2;
-    text(fb, tx, y + (h - 8) / 2, label, active ? COL_SEL_TEXT : COL_TEXT);
-    if (action) addHit(x, y, w, h, std::move(action));
+    const uint32_t fg = active ? COL_SEL_TEXT : (labelColor ? labelColor : COL_TEXT);
+    text(fb, tx, y + (h - 8) / 2, label, fg);
+    if (action) addHit(x, y, w, h, std::move(action), {}, {}, hint);
 }
 
 int UiApp::totalRows() const {
@@ -101,8 +111,6 @@ void UiApp::cycleParam(clap_id id, int button, bool shift) {
     double nv;
     if (id == PARAM_STEREO_SEPARATION) {
         nv = std::clamp(v + dir * (shift ? 0.25 : 0.05), lo, hi);
-    } else if (id == PARAM_PATTERN_BASE_NOTE || id == PARAM_SONG_ORDER_KEY) {
-        nv = std::clamp(v + dir * (shift ? 12 : 1), lo, hi);
     } else {
         nv = v + dir;
         if (nv > hi) nv = lo;
@@ -173,51 +181,68 @@ void UiApp::drawFront(Framebuffer& fb) {
     // Top bar
     bevel(fb, 4, 4, 240, 18, true, COL_LCD_BG);
     text(fb, 10, 9, padRight("Song: " + (snap.title.empty() ? "Untitled MOD" : snap.title), 28), COL_LCD_TEXT);
-    button(fb, 252, 4, 96, 18, "Instrument", !patternMode, [this](int, bool) {
-        plugin.setParamFromGui(PARAM_PLAYBACK_MODE, 0);
-    });
-    button(fb, 352, 4, 72, 18, "Pattern", patternMode, [this](int, bool) {
-        plugin.setParamFromGui(PARAM_PLAYBACK_MODE, 1);
-    });
-    button(fb, 432, 4, 72, 18, "Open MOD", false, [this](int, bool) { loadModDialog(); });
-    // Drag these onto a DAW track. Right-click saves a file instead.
-    button(fb, 508, 4, 40, 18, "MIDI", false, [this](int b, bool) {
+    addHit(4, 4, 240, 18, nullptr, {}, {}, "Title of the loaded MOD");
+    button(fb, 248, 4, 24, 18, "", false, [this](int, bool) { loadModDialog(); },
+           "Open a MOD file (or drop one on the window)");
+    floppy(fb, 256, 9, COL_TEXT);
+    // The two MIDI buttons are drag sources: drop them on a DAW track. Right-click saves a file instead.
+    text(fb, 436, 9, "MIDI:", COL_DIM);
+    button(fb, 480, 4, 40, 18, "PAT", false, [this](int b, bool) {
         if (b == 3) exportMidiDialog(false); else dragPending = {true, false, lastX, lastY};
-        status = "Drag onto a DAW track: pattern clip. Right-click saves a file";
-    });
-    button(fb, 550, 4, 48, 18, "Notes", false, [this](int b, bool) {
+    }, "Drag onto a DAW track: MIDI clip that plays the patterns. Right-click saves a file", COL_GREEN);
+    button(fb, 524, 4, 40, 18, "NOT", false, [this](int b, bool) {
         if (b == 3) exportMidiDialog(true); else dragPending = {true, true, lastX, lastY};
-        status = "Drag onto a DAW track: notes and effects. Right-click saves a file";
-    });
-    button(fb, 600, 4, 36, 18, "", false, [this](int, bool) { screen = Screen::Settings; });
+    }, "Drag onto a DAW track: the song as notes and effects. Right-click saves a file", COL_GREEN);
+    button(fb, 600, 4, 36, 18, "", false, [this](int, bool) { screen = Screen::Settings; }, "Settings");
     gear(fb, 614, 9, COL_TEXT);
 
-    // Sub-mode row
-    const char* subNames[3] = {"Single", "Multi", "Drum"};
-    const int subW[3] = {64, 56, 48};
+    // Mode row: single, multi, drum and pattern are mutually exclusive
+    const char* modeNames[4] = {"Single", "Multi", "Drum", "Pattern"};
+    const char* modeHints[4] = {
+        "Single: the selected sample plays on all keys",
+        "Multi: sample n plays on MIDI channel n",
+        "Drum: every sample has its own in key, like a drum kit",
+        "Pattern: keys play the MOD's patterns; the first row plays the whole song"};
+    const int modeW[4] = {64, 56, 48, 72};
     int bx = 4;
-    for (int i = 0; i < 3; ++i) {
-        const bool active = !patternMode && sub == i;
-        button(fb, bx, 28, subW[i], 16, subNames[i], active, [this, i](int, bool) {
-            plugin.setParamFromGui(PARAM_SUB_MODE, i);
-            plugin.setParamFromGui(PARAM_PLAYBACK_MODE, 0);
-        });
-        bx += subW[i] + 4;
+    for (int i = 0; i < 4; ++i) {
+        const bool active = i == 3 ? patternMode : (!patternMode && sub == i);
+        button(fb, bx, 28, modeW[i], 16, modeNames[i], active, [this, i](int, bool) {
+            if (i < 3) plugin.setParamFromGui(PARAM_SUB_MODE, i);
+            plugin.setParamFromGui(PARAM_PLAYBACK_MODE, i == 3 ? 1 : 0);
+        }, modeHints[i]);
+        bx += modeW[i] + 4;
     }
-    button(fb, bx + 8, 28, 88, 16, "Import WAV", false, [this](int, bool) { importWavDialog(); });
-    text(fb, bx + 104, 32, patternMode ? "Keys play patterns" : "Import goes to selected slot", COL_DIM);
 
     if (patternMode) drawPatternList(fb); else drawSampleMatrix(fb);
 
-    // Hint / status
-    const std::string hint = status.empty() ? "L-click +, R-click -, Shift = big step, wheel scrolls" : status;
-    text(fb, 8, MATRIX_Y + ROW_H * visibleRows() + 10, padRight(hint, 76), status.empty() ? COL_DIM : COL_TEXT);
-
     drawWavePanel(fb);
 
-    // Scopes
+    // Scopes, with a hint line below
     scopes.pull(plugin.scopeTap());
-    scopes.draw(fb, 8, 262, fb.getWidth() - 16, 130);
+    scopes.draw(fb, 8, 252, fb.getWidth() - 16, 128);
+    addHit(8, 252, fb.getWidth() - 16, 128, nullptr, {}, {}, "Scopes: the four Amiga channels");
+    drawHintLine(fb);
+}
+
+void UiApp::drawHintLine(Framebuffer& fb) {
+    // A message from an action stays for a few seconds, then the hint for whatever the mouse is over shows.
+    const auto now = std::chrono::steady_clock::now();
+    if (status != shownStatus) {
+        shownStatus = status;
+        statusTime = now;
+    }
+    const bool fresh = !status.empty() && now - statusTime < std::chrono::seconds(4);
+    std::string line = fresh ? status : std::string();
+    if (!fresh) {
+        for (auto it = hits.rbegin(); it != hits.rend(); ++it) {
+            if (!it->hint.empty() && inside(this, lastX, lastY, it->x, it->y, it->w, it->h)) {
+                line = it->hint;
+                break;
+            }
+        }
+    }
+    text(fb, 8, 386, padRight(line, 78), fresh ? COL_TEXT : COL_DIM);
 }
 
 void UiApp::drawSampleMatrix(Framebuffer& fb) {
@@ -230,13 +255,14 @@ void UiApp::drawSampleMatrix(Framebuffer& fb) {
     text(fb, 216, 50, "Lp", COL_TEXT);
     text(fb, 240, 50, "Vol", COL_TEXT);
     text(fb, 272, 50, "Fine", COL_TEXT);
-    text(fb, 314, 50, "Leg", COL_TEXT);
+    text(fb, 314, 50, "LE", COL_TEXT);
     if (sub == 0) text(fb, 352, 50, "Length", COL_TEXT);
     else if (sub == 1) text(fb, 352, 50, "MIDI ch", COL_TEXT);
     else { text(fb, 352, 50, "In key", COL_TEXT); text(fb, 408, 50, "Out key", COL_TEXT); }
 
     bevel(fb, 4, MATRIX_Y - 1, fb.getWidth() - 8, listH + 2, true, COL_LCD_BG);
-    addHit(4, MATRIX_Y - 1, fb.getWidth() - 8, listH + 2, nullptr, [this](int d) { scroll -= d * 3; clampScroll(); });
+    addHit(4, MATRIX_Y - 1, fb.getWidth() - 8, listH + 2, nullptr, [this](int d) { scroll -= d * 3; clampScroll(); }, {},
+           "Mouse wheel scrolls the list");
 
     for (int r = 0; r < visibleRows(); ++r) {
         const int slot = scroll + r + 1;
@@ -251,7 +277,7 @@ void UiApp::drawSampleMatrix(Framebuffer& fb) {
         std::snprintf(num, sizeof(num), "%02d", slot);
         text(fb, 8, y, num, fg);
         text(fb, 32, y, padRight(s.name, 22), fg);
-        text(fb, 216, y, s.loop ? "on" : "--", fg);
+        text(fb, 216, y, !s.loopDefined ? "--" : (s.loop ? "on" : "OFF"), fg);
         text(fb, 240, y, padLeft(std::to_string(s.volume), 3), fg);
         text(fb, 272, y, padLeft(std::to_string(s.finetune), 4), fg);
         text(fb, 312, y, s.legato ? "on" : "--", fg);
@@ -268,18 +294,30 @@ void UiApp::drawSampleMatrix(Framebuffer& fb) {
         addHit(6, y - 1, 204, h, [this, u](int b, bool) {
             plugin.selectSlot(u);
             if (b == 1) previewSlot(u, true); // plays while the mouse button is held
-        }, {}, [this, u]() { previewSlot(u, false); });
-        addHit(212, y - 1, 24, h, [this, u](int, bool) { plugin.adjustSlot(u, SlotField::Loop, 0); });
-        addHit(238, y - 1, 32, h, [this, u, step](int b, bool sh) { plugin.adjustSlot(u, SlotField::Volume, step(b, sh, 8)); },
-               [this, u](int d) { plugin.adjustSlot(u, SlotField::Volume, d); });
+        }, {}, [this, u]() { previewSlot(u, false); }, "Click to select the sample; hold to play it");
+        if (s.loopDefined) {
+            addHit(212, y - 1, 28, h, [this, u](int, bool) { plugin.adjustSlot(u, SlotField::Loop, 0); }, {}, {},
+                   "Loop: click to switch the sample's loop on or off (OFF = a loop range exists)");
+        } else {
+            addHit(212, y - 1, 28, h, nullptr, {}, {}, "Loop: this sample has no loop range");
+        }
+        addHit(242, y - 1, 28, h, [this, u, step](int b, bool sh) { plugin.adjustSlot(u, SlotField::Volume, step(b, sh, 8)); },
+               [this, u](int d) { plugin.adjustSlot(u, SlotField::Volume, d); },
+               {}, "Volume 0-64: L-click +, R-click -, Shift = big step, wheel");
         addHit(272, y - 1, 36, h, [this, u, step](int b, bool sh) { plugin.adjustSlot(u, SlotField::Finetune, step(b, sh, 4)); },
-               [this, u](int d) { plugin.adjustSlot(u, SlotField::Finetune, d); });
-        addHit(310, y - 1, 28, h, [this, u](int, bool) { plugin.adjustSlot(u, SlotField::Legato, 0); });
+               [this, u](int d) { plugin.adjustSlot(u, SlotField::Finetune, d); },
+               {}, "Finetune -8 to 7: L-click +, R-click -, Shift = big step, wheel");
+        addHit(310, y - 1, 28, h, [this, u](int, bool) { plugin.adjustSlot(u, SlotField::Legato, 0); }, {}, {},
+               "LE = legato: overlapping notes change pitch without restarting the sample");
+        if (sub == 0) addHit(350, y - 1, 56, h, nullptr, {}, {}, "Length of the sample data in bytes");
+        if (sub == 1) addHit(350, y - 1, 56, h, nullptr, {}, {}, "MIDI channel that plays this sample");
         if (sub == 2) {
             addHit(350, y - 1, 48, h, [this, u, step](int b, bool sh) { plugin.adjustSlot(u, SlotField::InKey, step(b, sh, 12)); },
-                   [this, u](int d) { plugin.adjustSlot(u, SlotField::InKey, d); });
+                   [this, u](int d) { plugin.adjustSlot(u, SlotField::InKey, d); },
+                   {}, "In key: the MIDI key that plays this sample. L-click +, R-click -, Shift = octave");
             addHit(406, y - 1, 48, h, [this, u, step](int b, bool sh) { plugin.adjustSlot(u, SlotField::OutKey, step(b, sh, 12)); },
-                   [this, u](int d) { plugin.adjustSlot(u, SlotField::OutKey, d); });
+                   [this, u](int d) { plugin.adjustSlot(u, SlotField::OutKey, d); },
+                   {}, "Out key: the pitch the sample sounds at (its root). L-click +, R-click -, Shift = octave");
         }
     }
 
@@ -302,7 +340,8 @@ void UiApp::drawPatternList(Framebuffer& fb) {
     bevel(fb, 4, 48, fb.getWidth() - 8, 12, false, COL_PANEL);
     text(fb, 8, 50, "Key   Pattern  Used at song order positions (hold to play)", COL_TEXT);
     bevel(fb, 4, MATRIX_Y - 1, fb.getWidth() - 8, listH + 2, true, COL_LCD_BG);
-    addHit(4, MATRIX_Y - 1, fb.getWidth() - 8, listH + 2, nullptr, [this](int d) { scroll -= d * 3; clampScroll(); });
+    addHit(4, MATRIX_Y - 1, fb.getWidth() - 8, listH + 2, nullptr, [this](int d) { scroll -= d * 3; clampScroll(); }, {},
+           "Mouse wheel scrolls the list");
 
     for (int r = 0; r < visibleRows(); ++r) {
         const int row = scroll + r;
@@ -317,7 +356,9 @@ void UiApp::drawPatternList(Framebuffer& fb) {
         const int key = song ? songKey : base + pat;
         if (key >= 0 && key <= 127) {
             addHit(6, y - 1, fb.getWidth() - 24, ROW_H, [this, key](int b, bool) { if (b == 1) plugin.guiNote(0, static_cast<uint8_t>(key), true); },
-                   {}, [this, key]() { plugin.guiNote(0, static_cast<uint8_t>(key), false); });
+                   {}, [this, key]() { plugin.guiNote(0, static_cast<uint8_t>(key), false); },
+                   song ? "Hold to play the whole song (also played by this MIDI key)"
+                        : "Hold to play this pattern (also played by this MIDI key)");
         }
         if (song) {
             text(fb, 8, y, padRight(noteName(songKey), 6) + "SONG     whole song: order list, jumps and breaks", fg);
@@ -334,25 +375,33 @@ void UiApp::drawPatternList(Framebuffer& fb) {
 }
 
 void UiApp::drawWavePanel(Framebuffer& fb) {
-    const int x0 = 8, y0 = 184, w = WIDTH - 20, h = 72;
+    const int x0 = 8, y0 = 172, w = WIDTH - 20, h = 72;
     const SlotView& sv = snap.slots[snap.selectedSlot];
     bevel(fb, x0 - 2, y0 - 2, w + 4, h + 4, true, COL_LCD_BG);
 
     char head[96];
     if (sv.length == 0) {
         std::snprintf(head, sizeof(head), "%02d  (empty slot)", snap.selectedSlot);
-    } else if (sv.loopEnd > 0) {
-        std::snprintf(head, sizeof(head), "%02d  %s  %u bytes  loop %u-%u", snap.selectedSlot, sv.name.substr(0, 22).c_str(), sv.length, sv.loopStart, sv.loopEnd);
+    } else if (sv.loopDefined) {
+        std::snprintf(head, sizeof(head), "%02d  %s  %u bytes  loop %u-%u%s", snap.selectedSlot, sv.name.substr(0, 22).c_str(), sv.length,
+                      sv.loopStart, sv.loopEnd, sv.loop ? "" : " (off)");
     } else {
         std::snprintf(head, sizeof(head), "%02d  %s  %u bytes  no loop", snap.selectedSlot, sv.name.substr(0, 22).c_str(), sv.length);
     }
     text(fb, x0 + 2, y0 + 1, head, COL_LCD_TEXT);
+    addHit(x0 - 2, y0 - 2, w + 4, h + 4, nullptr, {}, {}, "Waveform of the selected sample; yellow lines mark the loop");
 
-    const int top = y0 + 11, areaH = h - 12, mid = top + areaH / 2;
-    if (sv.length == 0 || snap.waveMin.size() < static_cast<size_t>(w)) return;
+    const int top = y0 + 11, areaH = h - 12;
+    if (sv.length > 0 && snap.waveMin.size() >= static_cast<size_t>(w)) drawWave(fb, sv, x0, top, areaH, w);
 
-    // loop region
-    if (sv.loopEnd > 0) {
+    button(fb, x0 + w - 22, y0 + h - 18, 20, 16, "", false, [this](int, bool) { importWavDialog(); },
+           "Import a WAV file into the selected slot (or drop one on a row)");
+    floppy(fb, x0 + w - 16, y0 + h - 14, COL_TEXT);
+}
+
+void UiApp::drawWave(Framebuffer& fb, const SlotView& sv, int x0, int top, int areaH, int w) {
+    const int mid = top + areaH / 2;
+    if (sv.loop && sv.loopEnd > 0) {
         const int lx0 = x0 + static_cast<int>(static_cast<uint64_t>(sv.loopStart) * w / sv.length);
         const int lx1 = x0 + static_cast<int>(static_cast<uint64_t>(sv.loopEnd) * w / sv.length);
         fb.fillRect(lx0, top, std::max(1, lx1 - lx0), areaH, 0xFF2A3A2A);
@@ -377,15 +426,13 @@ void UiApp::drawSettings(Framebuffer& fb) {
     const Row rows[] = {
         {"Output layout", PARAM_OUTPUT_LAYOUT, "changing needs a host rescan"},
         {"Resampler", PARAM_RESAMPLER_MODE, "Clean also skips Amiga filters"},
-        {"Filter model", PARAM_FILTER_MODEL, ""},
-        {"LED filter", PARAM_LED_FILTER, ""},
-        {"Stereo separation", PARAM_STEREO_SEPARATION, ""},
+        {"Filter model", PARAM_FILTER_MODEL, "Amiga output low-pass filter"},
+        {"LED filter", PARAM_LED_FILTER, "extra steep filter (effect E0x)"},
+        {"Stereo separation", PARAM_STEREO_SEPARATION, "0% = mono, 100% = hard panning"},
         {"Pitch", PARAM_PITCH_MODE, "Free lets pitch bend glide"},
-        {"Tempo", PARAM_TEMPO_MODE, ""},
+        {"Tempo", PARAM_TEMPO_MODE, "Follow host scales the MOD tempo"},
         {"Clock", PARAM_CLOCK, "changes pitch and timing slightly"},
-        {"Rows per beat", PARAM_ROWS_PER_BEAT, ""},
-        {"Pattern base note", PARAM_PATTERN_BASE_NOTE, "first pattern key"},
-        {"Song-order key", PARAM_SONG_ORDER_KEY, "plays the whole song"},
+        {"Rows per beat", PARAM_ROWS_PER_BEAT, "sets the MOD's starting tempo"},
     };
     int y = 32;
     for (const Row& row : rows) {

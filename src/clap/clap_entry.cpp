@@ -252,6 +252,29 @@ static const clap_plugin_audio_ports_config_t s_audio_ports_config_extension = {
     .select = clap_ports_config_select,
 };
 
+// Config info lets the host see which layout is current and what each one's ports look like
+static clap_id clap_ports_config_current(const clap_plugin_t* plugin) { return core(plugin)->fourMonoLayout() ? 1 : 0; }
+
+static bool clap_ports_config_info_get(const clap_plugin_t*, clap_id config_id, uint32_t index, bool is_input,
+                                       clap_audio_port_info_t* info) {
+    if (is_input || !info || config_id > 1 || index >= (config_id == 1 ? 4u : 1u)) return false;
+    const bool mono = config_id == 1;
+    std::memset(info, 0, sizeof(*info));
+    info->id = index;
+    if (mono) std::snprintf(info->name, sizeof(info->name), "Channel %u", index + 1);
+    else std::snprintf(info->name, sizeof(info->name), "Main Output");
+    info->flags = index == 0 ? CLAP_AUDIO_PORT_IS_MAIN : 0;
+    info->channel_count = mono ? 1 : 2;
+    info->port_type = mono ? CLAP_PORT_MONO : CLAP_PORT_STEREO;
+    info->in_place_pair = CLAP_INVALID_ID;
+    return true;
+}
+
+static const clap_plugin_audio_ports_config_info_t s_audio_ports_config_info_extension = {
+    .current_config = clap_ports_config_current,
+    .get = clap_ports_config_info_get,
+};
+
 // Note ports extension
 static uint32_t clap_note_ports_count(const clap_plugin_t* plugin, bool is_input) {
     return is_input ? 1 : 0;
@@ -320,6 +343,8 @@ static const void* clap_plugin_get_extension(const struct clap_plugin* plugin, c
     if (std::strcmp(id, CLAP_EXT_STATE) == 0) return &s_state_extension;
     if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS) == 0) return &s_audio_ports_extension;
     if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG) == 0) return &s_audio_ports_config_extension;
+    if (std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO) == 0 || std::strcmp(id, CLAP_EXT_AUDIO_PORTS_CONFIG_INFO_COMPAT) == 0)
+        return &s_audio_ports_config_info_extension;
     if (std::strcmp(id, CLAP_EXT_NOTE_PORTS) == 0) return &s_note_ports_extension;
     if (std::strcmp(id, CLAP_EXT_GUI) == 0 && paulascape::GuiWindow::isSupported()) return &s_gui_extension;
     return nullptr;
