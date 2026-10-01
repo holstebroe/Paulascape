@@ -154,10 +154,10 @@ std::string UiApp::exportTempMidi(bool notes) {
     return ok ? path.string() : std::string();
 }
 
-void UiApp::previewSlot(uint8_t slot, bool on) {
+void UiApp::previewSlot(uint8_t slot, bool on, uint8_t rootKey) {
     const int sub = static_cast<int>(snap.params[PARAM_SUB_MODE]);
     // Multi-channel slot n listens on MIDI channel n-1; drum slots on their in key; otherwise the root key.
-    uint8_t channel = 0, key = 60;
+    uint8_t channel = 0, key = rootKey;
     if (sub == 1) channel = static_cast<uint8_t>(slot - 1);
     if (sub == 2) key = snap.slots[slot].inKey;
     plugin.guiNote(channel, key, on);
@@ -187,12 +187,12 @@ void UiApp::drawFront(Framebuffer& fb) {
     floppy(fb, 256, 9, COL_TEXT);
     // The two MIDI buttons are drag sources: drop them on a DAW track. Right-click saves a file instead.
     text(fb, 436, 9, "MIDI:", COL_DIM);
-    button(fb, 480, 4, 40, 18, "PAT", false, [this](int b, bool) {
+    button(fb, 480, 4, 40, 18, "SNG", false, [this](int b, bool) {
         if (b == 3) exportMidiDialog(false); else dragPending = {true, false, lastX, lastY};
-    }, "Drag onto a DAW track: MIDI clip that plays the patterns. Right-click saves a file", COL_GREEN);
-    button(fb, 524, 4, 40, 18, "NOT", false, [this](int b, bool) {
+    }, "Drag onto a DAW track: the song as a clip of pattern keys. Right-click saves a file", COL_GREEN);
+    button(fb, 524, 4, 40, 18, "ALL", false, [this](int b, bool) {
         if (b == 3) exportMidiDialog(true); else dragPending = {true, true, lastX, lastY};
-    }, "Drag onto a DAW track: the song as notes and effects. Right-click saves a file", COL_GREEN);
+    }, "Drag onto a DAW track: all the song's notes and effects. Right-click saves a file", COL_GREEN);
     button(fb, 600, 4, 36, 18, "", false, [this](int, bool) { screen = Screen::Settings; }, "Settings");
     gear(fb, 614, 9, COL_TEXT);
 
@@ -389,7 +389,21 @@ void UiApp::drawWavePanel(Framebuffer& fb) {
         std::snprintf(head, sizeof(head), "%02d  %s  %u bytes  no loop", snap.selectedSlot, sv.name.substr(0, 22).c_str(), sv.length);
     }
     text(fb, x0 + 2, y0 + 1, head, COL_LCD_TEXT);
-    addHit(x0 - 2, y0 - 2, w + 4, h + 4, nullptr, {}, {}, "Waveform of the selected sample; yellow lines mark the loop");
+    // Clicking the waveform plays the sample; the horizontal position picks the key (C2 to C6, middle = C4)
+    const uint8_t slot = snap.selectedSlot;
+    const bool playable = sv.length > 0 && snap.params[PARAM_PLAYBACK_MODE] < 0.5;
+    auto keyAt = [x0, w](int x) { return static_cast<uint8_t>(36 + std::clamp(x - x0, 0, w - 1) * 49 / w); };
+    if (playable) {
+        addHit(x0 - 2, y0 - 2, w + 4, h + 4, [this, slot, keyAt](int b, bool) {
+            if (b != 1) return;
+            waveNote = {true, slot, keyAt(lastX)};
+            previewSlot(slot, true, waveNote.key);
+        }, {}, [this]() { stopWaveNote(); },
+        "Click to play the sample: left = low key, right = high key. Yellow lines mark the loop");
+    } else {
+        addHit(x0 - 2, y0 - 2, w + 4, h + 4, nullptr, {}, {}, "Waveform of the selected sample; yellow lines mark the loop");
+    }
+    waveKeyAt = keyAt;
 
     const int top = y0 + 11, areaH = h - 12;
     if (sv.length > 0 && snap.waveMin.size() >= static_cast<size_t>(w)) drawWave(fb, sv, x0, top, areaH, w);
@@ -502,9 +516,24 @@ void UiApp::onMouseUp(int, int, int button) {
     }
 }
 
+void UiApp::stopWaveNote() {
+    if (!waveNote.active) return;
+    waveNote.active = false;
+    previewSlot(waveNote.slot, false, waveNote.key);
+}
+
 void UiApp::onMouseMove(int x, int y) {
     lastX = x;
     lastY = y;
+    if (waveNote.active && waveKeyAt) {
+        // dragging along the waveform moves the note
+        const uint8_t key = waveKeyAt(x);
+        if (key != waveNote.key) {
+            previewSlot(waveNote.slot, false, waveNote.key);
+            waveNote.key = key;
+            previewSlot(waveNote.slot, true, key);
+        }
+    }
     if (!dragPending.active) return;
     if (std::abs(x - dragPending.x) < 4 && std::abs(y - dragPending.y) < 4) return;
     dragPending.active = false;

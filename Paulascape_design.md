@@ -215,7 +215,7 @@ Front page mock-up (drum mode selected):
 
 ```
 +--------------------------------------------------------------------------+
-| Song: MOD TITLE  [floppy]                       MIDI: [PAT] [NOT]   (*) |
+| Song: MOD TITLE  [floppy]                       MIDI: [SNG] [ALL]   (*) |
 +--------------------------------------------------------------------------+
 | [Single] [Multi] [Drum] [Pattern]                                        |
 |                                                                          |
@@ -238,9 +238,9 @@ The sample matrix's columns change with the mode: MIDI channel in multi-channel 
 
 **Front page**
 
-- Top bar: MOD title with a floppy button to open a MOD, green PAT and NOT drag buttons (pattern clip, notes; drag to the DAW), gear icon top right.
+- Top bar: MOD title with a floppy button to open a MOD, green SNG and ALL drag buttons (song as pattern clip, all notes; drag to the DAW), gear icon top right.
 - Mode row: single, multi, drum and pattern, mutually exclusive.
-- Sample waveform with a floppy button for importing a WAV into the selected slot.
+- Sample waveform: click to play the sample, the horizontal position sets the key; with a floppy button for importing a WAV into the selected slot.
 - Hint line under the scopes: a short hint for whatever the mouse is over.
 - Sample matrix: one row per sample with number, name, loop, volume, finetune, legato and the mode's columns. Click a row to select it (single mode); drop a WAV on it to replace the sample.
 - Four channel scopes.

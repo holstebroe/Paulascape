@@ -56,6 +56,17 @@ int main(int argc, char** argv) {
     ui.render(fb);
     if (!outDir.empty()) dump(fb, outDir + "/front_wave.ppm");
 
+    // Clicking the waveform plays the selected sample for as long as the button is held; dragging moves the key
+    ui.onMouseDown(100, 200, 1, false);
+    plugin.flush(nullptr, nullptr);
+    assert(plugin.getVoicePool().activeVoiceCount() == 1);
+    ui.onMouseMove(500, 200);
+    plugin.flush(nullptr, nullptr);
+    assert(plugin.getVoicePool().activeVoiceCount() == 1);
+    ui.onMouseUp(500, 200, 1);
+    plugin.flush(nullptr, nullptr);
+    assert(plugin.getVoicePool().activeVoiceCount() == 0);
+
     // Dragging the MIDI button out: nothing happens on a plain click, a drag exports a file and starts the OS drag
     {
         std::string dragged;

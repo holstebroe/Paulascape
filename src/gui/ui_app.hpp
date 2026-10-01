@@ -57,6 +57,8 @@ private:
     std::vector<Hit> hits;
     std::function<void()> pressedRelease;
     int lastX = 0, lastY = 0;
+    struct { bool active = false; uint8_t slot = 0, key = 60; } waveNote;
+    std::function<uint8_t(int)> waveKeyAt;
     struct { bool active = false; bool notes = false; int x = 0, y = 0; } dragPending;
 
     void drawFront(Framebuffer& fb);
@@ -67,7 +69,8 @@ private:
     void drawWavePanel(Framebuffer& fb);
     void drawWave(Framebuffer& fb, const SlotView& sv, int x0, int top, int areaH, int w);
     std::string exportTempMidi(bool notes);
-    void previewSlot(uint8_t slot, bool on);
+    void previewSlot(uint8_t slot, bool on, uint8_t rootKey = 60);
+    void stopWaveNote();
 
     void button(Framebuffer& fb, int x, int y, int w, int h, const std::string& label, bool active,
                 std::function<void(int, bool)> action, const std::string& hint = {}, uint32_t labelColor = 0);
