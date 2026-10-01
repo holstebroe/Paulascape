@@ -3,6 +3,7 @@
 #include "core/replayer.hpp"
 #include "core/voice_pool.hpp"
 #include "export/midi_file_reader.hpp"
+#include "core/pt2/pt2_tables.hpp"
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -90,7 +91,7 @@ void testNoteExport() {
     Module m = makeModule();
     m.patterns[0][0][0] = cell(1, 214);                      // C-3, sample 1
     m.patterns[0][1][0] = cell(2, 226);                      // sample 2 -> program change, velocity from volume 32
-    m.patterns[0][2][0] = cell(0, 190, 0x03, 0x10);          // tone portamento to E-3: legato overlap
+    m.patterns[0][2][0] = cell(0, 190, 0x03, 0x10);          // tone portamento to E-3: pitch bend on the held key
     m.patterns[0][3][0] = cell(0, 0, 0x0E, 0x53);            // E53 finetune -> CC 20 = 21
     m.patterns[0][4][0] = cell(0, 214, 0x0C, 0x10);          // Cxx with note: velocity
     m.patterns[0][5][0] = cell(0, 0, 0x04, 0x46);            // vibrato
@@ -116,21 +117,34 @@ void testNoteExport() {
     assert(pc.size() == 2 && pc[0]->data[1] == 0 && pc[1]->data[1] == 1);
     auto on = select(midi, 1, 0x90);
     auto off = select(midi, 1, 0x80);
-    // Note ons: C-3 (vel 127), D-3(226 -> key 59? B-2) sample 2 vel 64, porta target, Cxx, delayed, ...
-    assert(on.size() >= 5);
+    // Note ons: C-3 (vel 127), B-2 (226) sample 2 vel 64, Cxx, delayed; the tone portamento target is no new note
+    assert(on.size() == 4);
     assert(on[0]->data[1] == 60 && on[0]->data[2] == 127);
     assert(on[1]->data[2] == 64);                            // sample 2 volume 32 of 64
-    // Tone portamento row: CC68 on a tick before the note; the old key is released a tick after the new one is down
+    // Pitch bend range 48 semitones (RPN 0) at the start of the track
+    auto ccs0 = select(midi, 1, 0xB0);
+    bool rpn = false;
+    for (size_t i = 0; i + 2 < ccs0.size(); ++i)
+        rpn = rpn || (ccs0[i]->data[1] == 101 && ccs0[i]->data[2] == 0 && ccs0[i + 1]->data[1] == 100 && ccs0[i + 1]->data[2] == 0 &&
+                      ccs0[i + 2]->data[1] == 6 && ccs0[i + 2]->data[2] == 48 && ccs0[i]->tick == 0);
+    assert(rpn);
+    // Tone portamento row: B-2 stays held and bends up a tick ahead of each MOD tick (period 226 -> 210 -> 194 -> 190)
     const uint32_t portaTick = 2 * 24;
-    bool legatoOn = false, legatoOff = false, offAtPorta = false, offAfterPorta = false;
-    for (const auto& e : midi.events) {
-        if (e.track != 1 || e.data[0] == 0xFF) continue;
-        if ((e.data[0] & 0xF0) == 0xB0 && e.data[1] == 68 && e.data[2] >= 64 && e.tick == portaTick - 1) legatoOn = true;
-        if ((e.data[0] & 0xF0) == 0xB0 && e.data[1] == 68 && e.data[2] < 64 && e.tick == portaTick + 1) legatoOff = true;
-        if ((e.data[0] & 0xF0) == 0x80 && e.tick == portaTick) offAtPorta = true;
-        if ((e.data[0] & 0xF0) == 0x80 && e.tick == portaTick + 1 && e.data[1] == 59) offAfterPorta = true;
-    }
-    assert(legatoOn && legatoOff && !offAtPorta && offAfterPorta);
+    for (const auto* e : on) assert(e->tick != portaTick);
+    for (const auto* e : off) assert(e->tick < portaTick || e->tick > portaTick + 24);
+    std::vector<std::pair<uint32_t, int>> bends;
+    for (const auto* e : select(midi, 1, 0xE0)) bends.push_back({e->tick, e->data[1] | (e->data[2] << 7)});
+    auto bendAt = [&](uint32_t t) { int v = 8192; for (const auto& b : bends) if (b.first <= t) v = b.second; return v; };
+    const auto semis = [](int v) { return (v - 8192) / 8192.0 * 48.0; };
+    assert(bendAt(portaTick) == 8192);
+    assert(std::fabs(semis(bendAt(portaTick + 3)) - 12 * std::log2(226.0 / 210.0)) < 0.02);
+    assert(std::fabs(semis(bendAt(portaTick + 7)) - 12 * std::log2(226.0 / 194.0)) < 0.02);
+    assert(std::fabs(semis(bendAt(portaTick + 11)) - 12 * std::log2(226.0 / 190.0)) < 0.02);
+    // ... and set for the next note (row 4) just before it: the E53 of row 3 stays on the channel in ProTracker,
+    // so C-3 plays at finetune +3 (period 210 instead of 214), which the bend carries
+    const int p210 = pt2::periodTableFinetune[3][24];
+    assert(bendAt(4 * 24 - 2) != bendAt(4 * 24 - 1));
+    assert(std::fabs(semis(bendAt(4 * 24 - 1)) - 12 * std::log2(214.0 / p210)) < 0.02);
     // Cxx 0x10 with a note: velocity 1 + 16 * 126 / 64 = 33
     bool cxx = false;
     for (const auto* e : on) if (e->tick == 4 * 24) cxx = e->data[2] == 33;

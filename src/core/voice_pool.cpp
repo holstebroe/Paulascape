@@ -136,6 +136,11 @@ double VoicePool::channelBendFactor(const ActiveVoiceSlot& slot) const {
     return std::pow(2.0, -channels[slot.midiChannel & 15].bend / 12.0);
 }
 
+double VoicePool::channelBendRange(uint8_t midiChannel) const {
+    const double r = channels[midiChannel & 15].bendRange;
+    return r >= 0.0 ? r : bendRange;
+}
+
 void VoicePool::pushOutputPeriod(ActiveVoiceSlot& slot, double period) {
     slot.voice.setPeriod(static_cast<uint16_t>(std::lround(std::clamp(period, ABS_PERIOD_MIN, ABS_PERIOD_MAX))));
 }
@@ -207,6 +212,7 @@ void VoicePool::applyTickEffects(ActiveVoiceSlot& slot) {
 
     double volume = slot.baseVolume;
     double outPeriod = 0.0; // 0 = use slot.period
+    bool outBent = false;   // outPeriod already includes the pitch bend
 
     auto volSlide = [&]() {
         if (x) slot.baseVolume = static_cast<uint8_t>(std::min<int>(slot.baseVolume + x, 64));
@@ -216,10 +222,15 @@ void VoicePool::applyTickEffects(ActiveVoiceSlot& slot) {
     switch (slot.cmd) {
         case 0x00:
             if (slot.param) {
+                // In table mode the arpeggio steps from the bent pitch (a slide sent as pitch bend), as ProTracker
+                // steps from the slid period; Free mode bends the arpeggio as a whole.
+                const bool table = pitchMode == PitchMode::PeriodTable;
+                const double from = table ? slot.period * channelBendFactor(slot) : slot.period;
                 const uint16_t* row = fineRow(slot.finetune);
-                const int base = std::min(findInRow(row, static_cast<uint16_t>(slot.period)), 35);
+                const int base = std::min(findInRow(row, static_cast<uint16_t>(std::lround(from))), 35);
                 const int step = (rt % 3 == 0) ? 0 : (rt % 3 == 1 ? x : y);
                 outPeriod = row[std::min(base + step, 35)];
+                outBent = table;
             }
             break;
         case 0x01: slot.period = std::max<double>(slot.period - slot.param, PERIOD_MIN); break;
@@ -244,7 +255,7 @@ void VoicePool::applyTickEffects(ActiveVoiceSlot& slot) {
     if (slot.cmd == 0x05 || slot.cmd == 0x06) volSlide();
 
     double period = outPeriod > 0.0 ? outPeriod : slot.period;
-    period *= channelBendFactor(slot);
+    if (!outBent) period *= channelBendFactor(slot);
 
     // Vibrato: explicit 4xy/6xy, or the mod wheel
     uint8_t vSpeed = 0, vDepth = 0;
@@ -489,12 +500,12 @@ void VoicePool::allNotesOff() {
 }
 
 void VoicePool::setPitchBend(uint8_t midiChannel, int semitones) {
-    setPitchBendValue(midiChannel, 8192 + static_cast<int>(std::lround(semitones / std::max(bendRange, 0.01) * 8192.0)));
+    setPitchBendValue(midiChannel, 8192 + static_cast<int>(std::lround(semitones / std::max(channelBendRange(midiChannel), 0.01) * 8192.0)));
 }
 
 void VoicePool::setPitchBendValue(uint8_t midiChannel, int value14) {
     midiChannel &= 15;
-    channels[midiChannel].bend = (std::clamp(value14, 0, 16383) - 8192) / 8192.0 * bendRange;
+    channels[midiChannel].bend = (std::clamp(value14, 0, 16383) - 8192) / 8192.0 * channelBendRange(midiChannel);
     // Free mode glides smoothly; period-table mode updates on the next tick, like 1xx/2xx.
     if (pitchMode == PitchMode::Free) {
         for (auto& slot : voices) {
@@ -575,6 +586,16 @@ void VoicePool::controlChange(uint8_t midiChannel, uint8_t cc, uint8_t value) {
         ch.retrigger = value;
     } else if (cc == m.noteCut) {
         ch.noteCut = value;
+    } else if (cc == 101) {
+        ch.rpnMsb = value;
+    } else if (cc == 100) {
+        ch.rpnLsb = value;
+    } else if (cc == 6 || cc == 38) {
+        // RPN 0: pitch bend range for this channel (data entry MSB = semitones, LSB = cents)
+        if (ch.rpnMsb == 0 && ch.rpnLsb == 0) {
+            const double base = ch.bendRange >= 0.0 ? ch.bendRange : bendRange;
+            ch.bendRange = cc == 6 ? value : std::floor(base) + std::min<int>(value, 99) / 100.0;
+        }
     } else if (cc == m.fxNumber) {
         ch.fxNumber = value;
     } else if (cc == m.fxHigh) {

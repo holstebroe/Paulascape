@@ -76,6 +76,15 @@ public:
     uint8_t getChannelVolume(size_t c) const { return channels[c & 3].voice.getVolume(); }
     bool isChannelActive(size_t c) const { return channels[c & 3].voice.isActive(); }
     const PaulaVoice& channelVoice(size_t c) const { return channels[c & 3].voice; }
+
+    // Offline stepping (MIDI export): one replayer tick without rendering audio, after patternNoteOn
+    void stepTick() { if (playing) tick(); }
+    // The channel's pitch without vibrato and arpeggio: slides, tone portamento (with glissando) and fine slides
+    uint16_t getChannelSlidePeriod(size_t c) const {
+        const auto& ch = channels[c & 3];
+        const bool modulated = (ch.cmd == 0x00 && ch.param) || ch.cmd == 0x04 || ch.cmd == 0x06;
+        return modulated ? ch.period : ch.voice.getPeriod();
+    }
     float getScopeOutput(size_t ch) const { return scopeOutputs[ch & 3]; }
 
 private:

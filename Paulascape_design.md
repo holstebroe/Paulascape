@@ -201,7 +201,7 @@ Splitting the 8-bit parameter into nibbles fits in 7-bit CCs and matches how MOD
 
 The plugin keeps the effect memory (3xx speed, 4xy/7xy speed and depth, 9xx offset, E3x/E4x/E7x) per MIDI channel as ProTracker does per MOD channel, so a new note keeps it. Each effect command or note restarts the channel's tick clock as tick 0 of a row, so a row of speed 6 gets five effect ticks.
 
-Tone portamento with a note: the new key goes down while the old one is held and the old key is released a tick later; the pending 3xx/5xy makes the voice slide at its speed instead of restarting. CC 68/CC 5 are also written for other synths. Velocity 1–127 is volume 0–64, so volume 0 notes survive.
+Pitch movement goes out as pitch bend: the exporter steps the replayer tick by tick and bends the held key to the exact period for 1xx, 2xx, 3xx, 5xy (its volume slide goes out as Axy), E1x, E2x and glissando. Each track starts with RPN 0 setting a ±48 semitone bend range (the Amiga range is about 35); at 14 bits that is under one cent per step, so the voice pool lands on the exact period. Tone portamento keeps the old key held and bends it to the target, so a track never holds two keys and a host cannot play a slide as a chord. Bends go a MIDI tick ahead of the MOD tick they belong to, like the setup events. Vibrato and arpeggio stay effect commands; in period-table mode the arpeggio steps from the bent pitch. Velocity 1–127 is volume 0–64, so volume 0 notes survive.
 
 **Pattern-mode export:** the easiest exact export is a clip of pattern-mode notes, one per order-list position, since the plugin then plays its own patterns. This ships before the full note-by-note export.
 

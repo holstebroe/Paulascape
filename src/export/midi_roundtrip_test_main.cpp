@@ -163,6 +163,7 @@ std::vector<std::array<Snap, 4>> playMidi(const Module& mod, const Midi& midi, c
                 case 0x80: pool.noteOff(ch, d[1]); break;
                 case 0xB0: pool.controlChange(ch, d[1], d[2]); break;
                 case 0xC0: pool.programChange(ch, d[1]); break;
+                case 0xE0: pool.setPitchBendValue(ch, d[1] | (d[2] << 7)); break;
                 default: break;
             }
         }
@@ -191,7 +192,7 @@ std::string snapText(const Snap& s) {
 size_t compare(const Module& mod, const std::vector<UnrolledRow>& rows, const std::vector<Probe>& at,
                const std::vector<std::array<Snap, 4>>& want, const std::vector<std::array<Snap, 4>>& got,
                const char* label, size_t maxReport) {
-    size_t bad = 0, total = 0, sounding = 0;
+    size_t bad = 0, total = 0, sounding = 0, endJitters = 0;
     std::map<std::string, size_t> byEffect;
     std::array<Snap, 4> prevWant{}, prevGot{};
     for (size_t i = 0; i < at.size(); ++i) {
@@ -202,11 +203,18 @@ size_t compare(const Module& mod, const std::vector<UnrolledRow>& rows, const st
             // a new voice or a higher trigger count since the last probe means the sample was (re)started
             const bool wTrig = w.sounding && (w.voiceId != prevWant[c].voiceId || w.triggers != prevWant[c].triggers);
             const bool gTrig = g.sounding && (g.voiceId != prevGot[c].voiceId || g.triggers != prevGot[c].triggers);
+            // A one-shot sample running out: the voice pool's ticks trail the replayer's by up to half a tick, so
+            // with pitch effects the end can fall one probe apart. Allowed once, when both played the same sample.
+            const Snap& still = w.sounding ? w : g;
+            const bool endJitter = w.sounding != g.sounding && still.sample && !still.sample->header.loopEnabled &&
+                                   prevWant[c].sounding && prevGot[c].sounding && prevWant[c].sample == prevGot[c].sample &&
+                                   i + 1 < at.size() && !want[i + 1][c].sounding && !got[i + 1][c].sounding;
             prevWant[c] = w;
             prevGot[c] = g;
             ++total;
             sounding += w.sounding ? 1 : 0;
             std::string why;
+            if (endJitter) { ++endJitters; continue; }
             if (w.sounding != g.sounding) why = "sounding";
             else if (w.sounding) {
                 if (w.sample != g.sample) why = "sample";
@@ -230,7 +238,9 @@ size_t compare(const Module& mod, const std::vector<UnrolledRow>& rows, const st
             }
         }
     }
-    std::cout << label << ": " << bad << " of " << total << " channel ticks differ (" << sounding << " sounding)";
+    std::cout << label << ": " << bad << " of " << total << " channel ticks differ (" << sounding << " sounding";
+    if (endJitters) std::cout << ", " << endJitters << " sample end one probe apart";
+    std::cout << ")";
     if (!byEffect.empty()) {
         std::cout << " [";
         bool first = true;
@@ -241,13 +251,47 @@ size_t compare(const Module& mod, const std::vector<UnrolledRow>& rows, const st
     return bad;
 }
 
-size_t roundTrip(const Module& mod, int patternIndex, const char* name, size_t maxReport = 40) {
+// Each MOD channel is monophonic: its track must never hold two keys at once, or a host plays a chord where
+// the MOD slides. Returns the number of overlaps; counts pitch bends per track in `bends`.
+size_t overlaps(const Midi& midi, const char* name, std::array<size_t, 4>& bends) {
+    std::vector<const Ev*> evs;
+    for (const auto& e : midi.events) evs.push_back(&e);
+    std::stable_sort(evs.begin(), evs.end(), [](const Ev* a, const Ev* b) {
+        if (a->tick != b->tick) return a->tick < b->tick;
+        const bool offA = (a->data[0] & 0xF0) == 0x80, offB = (b->data[0] & 0xF0) == 0x80;
+        return offA && !offB; // offs first at a shared tick, as hosts play them
+    });
+    size_t n = 0;
+    std::array<int, 4> held{};
+    bends.fill(0);
+    for (const Ev* e : evs) {
+        if (e->track < 1 || e->track > 4 || e->data[0] == 0xFF) continue;
+        const size_t t = static_cast<size_t>(e->track - 1);
+        const uint8_t st = e->data[0] & 0xF0;
+        if (st == 0x90 && e->data[2] > 0) {
+            if (held[t] > 0) {
+                ++n;
+                std::cout << "  [" << name << "] track " << t + 1 << " holds two keys at MIDI tick " << e->tick << "\n";
+            }
+            ++held[t];
+        } else if (st == 0x80 || st == 0x90) {
+            held[t] = std::max(held[t] - 1, 0);
+        } else if (st == 0xE0) {
+            ++bends[t];
+        }
+    }
+    return n;
+}
+
+size_t roundTrip(const Module& mod, int patternIndex, const char* name, size_t maxReport = 40, std::array<size_t, 4>* bendCount = nullptr) {
     const auto rows = patternIndex >= 0 ? SongUnroller::unrollPattern(mod, patternIndex) : SongUnroller::unrollSong(mod);
     assert(!rows.empty());
     const auto at = probes(rows);
     const Midi midi = parse(MidiExporter::generateMidiBuffer(mod, patternIndex));
     const auto want = playReplayer(mod, at, patternIndex >= 0 ? 24 + patternIndex : 12);
-    size_t bad = 0;
+    std::array<size_t, 4> bends{};
+    size_t bad = overlaps(midi, name, bends);
+    if (bendCount) *bendCount = bends;
     for (SameTickOrder o : {SameTickOrder::File, SameTickOrder::NotesFirst}) {
         const std::string label = std::string(name) + (o == SameTickOrder::File ? " (file order)" : " (notes first)");
         bad += compare(mod, rows, at, want, playMidi(mod, midi, at, o), label.c_str(), maxReport);
@@ -441,12 +485,13 @@ size_t testEffectModule() {
     return bad;
 }
 
-size_t testRealModule() {
+size_t testRealModule(const char* file, int pattern = -1, std::array<size_t, 4>* bends = nullptr) {
     Module mod;
-    const bool loaded = ModLoader::loadFromFile(std::string(PAULASCAPE_TEST_DIR) + "/mods/BEDROCK.MOD", mod);
+    const bool loaded = ModLoader::loadFromFile(std::string(PAULASCAPE_TEST_DIR) + "/mods/" + file, mod);
     assert(loaded);
     (void)loaded;
-    return roundTrip(mod, -1, "BEDROCK.MOD", 20);
+    const std::string name = std::string(file) + (pattern >= 0 ? " pattern " + std::to_string(pattern) : "");
+    return roundTrip(mod, pattern, name.c_str(), 20, bends);
 }
 
 } // namespace
@@ -455,7 +500,15 @@ int main() {
     std::cout << "Testing MIDI export round trip..." << std::endl;
     // everything runs before the check, so one report shows all differences
     size_t bad = testEffectModule();
-    bad += testRealModule();
+    bad += testRealModule("BEDROCK.MOD");
+    bad += testRealModule("JULEMAND.MOD");
+    // Tone portamento on channel 3 (sample 8): one held key per slide, the slide itself in pitch bends
+    std::array<size_t, 4> bends{};
+    bad += testRealModule("JULEMAND.MOD", 5, &bends);
+    if (bends[2] < 10) {
+        std::cout << "JULEMAND.MOD pattern 5: only " << bends[2] << " pitch bends on channel 3" << std::endl;
+        ++bad;
+    }
     if (bad != 0) {
         std::cout << "MIDI round trip FAILED: " << bad << " differences" << std::endl;
         return 1;

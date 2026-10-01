@@ -137,6 +137,8 @@ private:
         uint8_t retrigger = 0;        // ticks, 0 = off
         uint8_t noteCut = 0;          // ticks, 0 = off
         uint8_t fxNumber = 0, fxHigh = 0;
+        uint8_t rpnMsb = 127, rpnLsb = 127; // selected RPN (127/127 = none)
+        double bendRange = -1.0;      // semitones set with RPN 0, below 0 = the global setting
         uint8_t pendingCmd = 0, pendingParam = 0;
         int pendingTicks = 0;         // effect command waiting for a note on the same row (ticks left)
         double tickCounter = 0.0;     // effect tick clock, restarted by notes and effect commands (a new row)
@@ -188,6 +190,7 @@ private:
     void startEffectOnVoice(ActiveVoiceSlot& slot, uint8_t cmd, uint8_t param, bool atStart);
     void release(ActiveVoiceSlot& slot);
     double channelBendFactor(const ActiveVoiceSlot& slot) const;
+    double channelBendRange(uint8_t midiChannel) const;
     void pushOutputPeriod(ActiveVoiceSlot& slot, double period);
     uint8_t outputVolume(const ActiveVoiceSlot& slot) const;
 };

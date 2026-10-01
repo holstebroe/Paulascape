@@ -1,6 +1,7 @@
 #include "midi_export.hpp"
 #include "song_unroll.hpp"
 #include "core/fx_util.hpp"
+#include "core/replayer.hpp"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -10,6 +11,7 @@ namespace paulascape {
 namespace {
 
 constexpr int TPQN = 96;
+constexpr int BEND_RANGE = 48; // semitones, set with RPN 0: covers the whole Amiga period range (about 35)
 
 void writeBE16(std::vector<uint8_t>& buf, uint16_t v) {
     buf.push_back(static_cast<uint8_t>(v >> 8));
@@ -36,7 +38,7 @@ int periodToMidiKey(uint16_t period) {
 // A track under construction: events with absolute ticks, encoded to deltas at the end.
 struct Event {
     uint32_t tick;
-    int priority; // at equal ticks: note-offs, then program/CC, then note-ons, then trailing CCs
+    int priority; // at equal ticks: note-offs and pitch bends, then program/CC, then note-ons, then trailing events
     size_t seq;
     std::vector<uint8_t> bytes;
 };
@@ -170,15 +172,36 @@ std::vector<uint8_t> MidiExporter::generateMidiBuffer(const Module& mod, int pat
     }
     const uint32_t endTick = tick;
 
+    // Pitch per tick and channel as the replayer plays it, without vibrato and arpeggio (those go out as effect
+    // commands). Slides, tone portamento and fine slides become pitch bend from this.
+    std::vector<std::vector<std::array<uint16_t, 4>>> slidePeriod(rows.size());
+    {
+        Replayer rep;
+        rep.setModule(&mod);
+        rep.setTempoSyncMode(TempoSyncMode::ModNative);
+        rep.setSongOrderKey(0);
+        rep.setPatternBaseNote(1);
+        rep.patternNoteOn(static_cast<uint8_t>(patternIndex >= 0 ? 1 + patternIndex : 0));
+        for (size_t i = 0; i < rows.size(); ++i) {
+            for (int k = 0; k < rows[i].speed; ++k) {
+                rep.stepTick();
+                std::array<uint16_t, 4> p{};
+                for (size_t c = 0; c < 4; ++c) p[c] = rep.getChannelSlidePeriod(c);
+                slidePeriod[i].push_back(p);
+            }
+        }
+    }
+
     for (size_t ch = 0; ch < 4; ++ch) {
         Track& trk = tracks[ch];
         const uint8_t chan = static_cast<uint8_t>(ch);
         nameEvent(trk, "MOD channel " + std::to_string(ch + 1));
 
         int activeKey = -1;
+        double keyPeriod = 0;// period the voice pool gives the held key
+        int bend = 8192;     // pitch bend last sent
         int sample = 0;      // sample currently selected on this track
         int volume = 64;     // channel volume as the replayer has it (sample default, Cxx, slides, cuts)
-        int portaSpeed = 0;  // 3xx memory, for the glide CC
         bool fxActive = false;
 
         auto cc = [&](uint32_t t, int prio, uint8_t num, uint8_t val) {
@@ -191,6 +214,36 @@ std::vector<uint8_t> MidiExporter::generateMidiBuffer(const Module& mod, int pat
         };
         auto noteOff = [&](uint32_t t, int prio, int key) {
             trk.add(t, prio, {static_cast<uint8_t>(0x80 | chan), static_cast<uint8_t>(key), 0});
+        };
+        // Pitch bend range for this channel (RPN 0), then the null RPN
+        cc(0, 1, 101, 0); cc(0, 1, 100, 0); cc(0, 1, 6, BEND_RANGE); cc(0, 1, 38, 0); cc(0, 1, 101, 127); cc(0, 1, 100, 127);
+        // The pitch bend that makes the held key sound at `period`, as the voice pool rounds it
+        auto bendTo = [&](uint32_t t, double period) {
+            if (keyPeriod <= 0 || period <= 0) return;
+            const double semis = 12.0 * std::log2(keyPeriod / period);
+            const int guess = 8192 + static_cast<int>(std::lround(semis / BEND_RANGE * 8192.0));
+            int v = std::clamp(guess, 0, 16383);
+            for (int d = 0; d <= 4; ++d) { // nearest value that rounds to the exact period
+                bool found = false;
+                for (int cand : {guess - d, guess + d}) {
+                    if (cand < 0 || cand > 16383) continue;
+                    const double p = keyPeriod * std::pow(2.0, -((cand - 8192) / 8192.0 * BEND_RANGE) / 12.0);
+                    if (std::lround(p) == std::lround(period)) { v = cand; found = true; break; }
+                }
+                if (found) break;
+            }
+            if (v == bend) return;
+            bend = v;
+            trk.add(t, 0, {static_cast<uint8_t>(0xE0 | chan), static_cast<uint8_t>(v & 127), static_cast<uint8_t>(v >> 7)}); // before effect CCs at that tick
+        };
+        // Period of a key in the voice pool: its sample's finetune row, or E5x on the note's row
+        auto poolKeyPeriod = [&](int key, int finetune) {
+            return static_cast<double>(fx::fineRow(static_cast<int8_t>(finetune))[std::clamp(key - 36, 0, 35)]);
+        };
+        // One MIDI tick ahead of MOD tick k of row i, like the other setup events
+        auto tickTime = [&](size_t i, int k) {
+            const uint32_t t = rowStart[i] + SongUnroller::rowTicks(rows[i].speed, rowsPerBeat) * k / rows[i].speed;
+            return t > 0 ? t - 1 : 0;
         };
         // Volume changes on the ticks after the first (Axy, 5xy, 6xy, ECx), as the replayer applies them
         auto tickVolume = [&](const NoteCell& c, int ticks, int speed) {
@@ -208,6 +261,7 @@ std::vector<uint8_t> MidiExporter::generateMidiBuffer(const Module& mod, int pat
             if (ur.delayRepeat) {
                 // EEx repeat: no new notes, but the row's effect runs on every tick
                 tickVolume(cell, ur.speed, ur.speed);
+                if (activeKey != -1) for (int k = 0; k < ur.speed; ++k) bendTo(tickTime(i, k), slidePeriod[i][k][ch]);
                 continue;
             }
             const uint32_t T = rowStart[i];
@@ -221,8 +275,8 @@ std::vector<uint8_t> MidiExporter::generateMidiBuffer(const Module& mod, int pat
             const bool delayed = ext && x == 0xD && y > 0;
             // EDx longer than the row: ProTracker never plays the note
             const bool playsNote = cell.period > 0 && !(delayed && y >= ur.speed);
+            // Tone portamento keeps the held key; pitch bend slides it to the new note
             const bool legato = playsNote && tonePorta && activeKey != -1;
-            if (cell.effect == 0x03 && cell.param) portaSpeed = cell.param;
 
             bool volumeReset = false; // sample number: the channel volume returns to the sample's
             if (cell.sample > 0 && cell.sample <= 31) {
@@ -249,8 +303,11 @@ std::vector<uint8_t> MidiExporter::generateMidiBuffer(const Module& mod, int pat
                     else send = true;
                     break;
                 case 0x00: send = cell.param != 0; break;
+                case 0x01: case 0x02: case 0x03: break;                     // pitch bend
+                case 0x05: send = true; break;                              // volume slide part, sent as Axy
                 default: send = true; break;
             }
+            if (ext && (x == 0x1 || x == 0x2 || x == 0x3)) send = false;     // fine slides, glissando: pitch bend
 
             if (volumeReset && !velocityNote && cell.effect != 0x0C) {
                 // the sample number resets the volume of the sounding note (or a tone portamento target)
@@ -262,29 +319,25 @@ std::vector<uint8_t> MidiExporter::generateMidiBuffer(const Module& mod, int pat
             }
             if (send) {
                 // nibbles: for E effects the plugin rebuilds the parameter from the number and y
-                fxTriple(P, ext ? static_cast<uint8_t>(16 + x) : cell.effect, ext ? static_cast<uint8_t>(y) : cell.param);
+                const uint8_t number = ext ? static_cast<uint8_t>(16 + x) : (cell.effect == 0x05 ? 0x0A : cell.effect);
+                fxTriple(P, number, ext ? static_cast<uint8_t>(y) : cell.param);
                 fxActive = true;
             }
 
-            if (playsNote) {
+            const int heldKey = activeKey;
+            const double heldPeriod = keyPeriod;
+            int noteK = -1; // tick of the row on which a new key starts
+            double newPeriod = 0;
+            if (playsNote && !legato) {
                 const int key = periodToMidiKey(cell.period);
-                const uint32_t noteTick = delayed ? T + rowLen * y / ur.speed : T;
-                if (legato) {
-                    // Tone portamento: the new key arrives while the old one is still held, so the voice glides
-                    // instead of restarting. The old key is released just after the new one is down.
-                    if (key != activeKey) {
-                        const int glide = portaSpeed ? std::clamp(128 - 2 * portaSpeed, 1, 127) : 64;
-                        cc(P, 1, 68, 127);
-                        cc(P, 1, 5, static_cast<uint8_t>(glide));
-                        trk.add(T, 2, {static_cast<uint8_t>(0x90 | chan), static_cast<uint8_t>(key), velocityFor(volume)});
-                        noteOff(T + 1, 0, activeKey);
-                        cc(T + 1, 1, 68, 0);
-                    }
-                } else {
-                    if (activeKey != -1) noteOff(noteTick, 0, activeKey);
-                    trk.add(noteTick, 2, {static_cast<uint8_t>(0x90 | chan), static_cast<uint8_t>(key), velocityFor(volume)});
-                }
+                noteK = delayed ? y : 0;
+                const uint32_t noteTick = T + rowLen * noteK / ur.speed;
+                const int fine = (ext && x == 0x5) ? (y >= 8 ? y - 16 : y)
+                                                   : mod.samples[sample > 0 ? sample : static_cast<int>(ch) + 1].header.finetune;
+                newPeriod = poolKeyPeriod(key, fine);
                 activeKey = key;
+                if (heldKey != -1) noteOff(noteTick, 0, heldKey);
+                trk.add(noteTick, 2, {static_cast<uint8_t>(0x90 | chan), static_cast<uint8_t>(key), velocityFor(volume)});
             }
 
             // EAx/EBx act after the note has started
@@ -292,8 +345,19 @@ std::vector<uint8_t> MidiExporter::generateMidiBuffer(const Module& mod, int pat
             if (ext && x == 0xB) volume = std::max(volume - y, 0);
             if (ext && x == 0xC && y == 0) volume = 0;
 
+            // Pitch on each tick: bends for the key held at that tick (the old one until a delayed note starts).
+            // A bend goes a MIDI tick ahead, so a new key starts with its own bend in place.
+            const bool cut = ext && x == 0xC && y > 0 && y < ur.speed;
+            keyPeriod = heldPeriod;
+            for (int k = 0; k < (cut ? y : ur.speed); ++k) {
+                if (k == noteK) keyPeriod = newPeriod;
+                if ((noteK >= 0 && k >= noteK ? activeKey : heldKey) == -1) continue;
+                bendTo(tickTime(i, k), slidePeriod[i][k][ch]);
+            }
+            if (noteK >= 0) keyPeriod = newPeriod;
+
             // ECx note cut
-            if (ext && x == 0xC && y > 0 && y < ur.speed && activeKey != -1) {
+            if (cut && activeKey != -1) {
                 noteOff(T + rowLen * y / ur.speed, 0, activeKey);
                 activeKey = -1;
             }
