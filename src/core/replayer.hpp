@@ -75,6 +75,7 @@ public:
     uint16_t getChannelPeriod(size_t c) const { return channels[c & 3].voice.getPeriod(); }
     uint8_t getChannelVolume(size_t c) const { return channels[c & 3].voice.getVolume(); }
     bool isChannelActive(size_t c) const { return channels[c & 3].voice.isActive(); }
+    const PaulaVoice& channelVoice(size_t c) const { return channels[c & 3].voice; }
     float getScopeOutput(size_t ch) const { return scopeOutputs[ch & 3]; }
 
 private:

@@ -93,6 +93,8 @@ void PaulaVoice::trigger(const ModSample* smp, uint16_t period, uint8_t volume, 
         return;
     }
     activeSample = smp;
+    ++triggerCount;
+    lastStartOffset = startOffset;
     setVolume(volume);
     setPeriod(period > 0 ? period : 214);
     samplePos = static_cast<double>(startOffset);

@@ -143,7 +143,7 @@ Performance controls drive the same effect code the replayer uses, so vibrato an
 
 | MIDI input | MOD effect | Behavior |
 | --- | --- | --- |
-| Velocity | Cxx set volume | 0–127 scaled to 0–64 |
+| Velocity | Cxx set volume | 1–127 scaled to 0–64 |
 | Pitch bend | 1xx / 2xx portamento | ±2 semitones by default; smooth in Free pitch mode |
 | Mod wheel (CC 1) | 4xy vibrato depth | Speed from CC 76 |
 | CC 68 (legato footswitch) | Legato on/off | 64 and up = on, per MIDI channel; overrides the slot's legato setting |
@@ -197,7 +197,11 @@ Most effects export cleanly as notes, timing or a tempo map. The hard ones chang
 | CC 21 | Parameter high nibble (x) | 0–15 |
 | CC 22 | Parameter low nibble (y) | 0–15; the effect applies when this arrives |
 
-Splitting the 8-bit parameter into nibbles fits in 7-bit CCs and matches how MOD parameters read (xy). The CCs go at the row's time, just before any note on that row.
+Splitting the 8-bit parameter into nibbles fits in 7-bit CCs and matches how MOD parameters read (xy). Program changes and effect CCs go one MIDI tick (a quarter of a MOD tick) before the row, so they reach the plugin before the row's notes even when a host sends notes first at a shared time. A row with no effect after one with an effect gets a clear triple (0, 0, 0); a sample number without a note sends Cxx with the sample's volume.
+
+The plugin keeps the effect memory (3xx speed, 4xy/7xy speed and depth, 9xx offset, E3x/E4x/E7x) per MIDI channel as ProTracker does per MOD channel, so a new note keeps it. Each effect command or note restarts the channel's tick clock as tick 0 of a row, so a row of speed 6 gets five effect ticks.
+
+Tone portamento with a note: the new key goes down while the old one is held and the old key is released a tick later; the pending 3xx/5xy makes the voice slide at its speed instead of restarting. CC 68/CC 5 are also written for other synths. Velocity 1–127 is volume 0–64, so volume 0 notes survive.
 
 **Pattern-mode export:** the easiest exact export is a clip of pattern-mode notes, one per order-list position, since the plugin then plays its own patterns. This ships before the full note-by-note export.
 

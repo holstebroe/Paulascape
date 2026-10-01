@@ -66,7 +66,9 @@ struct ActiveVoiceSlot {
     uint8_t vibratoCmd = 0, tremoloCmd = 0;
     bool glissando = false;
     uint32_t ticksSinceStart = 0;
+    uint32_t rowTick = 0;        // ticks since the effect command (or note) that started the current row
     uint8_t delayTicks = 0;      // note delay (EDx) remaining
+    bool fresh = false;          // started at this instant, nothing rendered yet
 
     // Clean-mode release fade
     bool releasing = false;
@@ -92,7 +94,7 @@ public:
         selectedSlot = slot < 1 ? 1 : (slot > 31 ? 31 : slot);
         channelProgram.fill(0); // choosing a slot by hand overrides MIDI program changes
     }
-    void programChange(uint8_t midiChannel, uint8_t program) { channelProgram[midiChannel & 15] = static_cast<uint8_t>(std::min<int>(program + 1, 31)); }
+    void programChange(uint8_t midiChannel, uint8_t program);
     void setMidiMap(const MidiMap& map) { midiMap = map; }
     const MidiMap& getMidiMap() const { return midiMap; }
     void setPitchBendRange(double semitones) { bendRange = semitones; }
@@ -120,6 +122,8 @@ public:
     size_t activeVoiceCount() const;
     uint16_t voicePeriod(size_t index) const { return voices[index % MAX_VOICES].voice.getPeriod(); }
     bool voiceActive(size_t index) const { return voices[index % MAX_VOICES].voice.isActive(); }
+    // The newest sounding (active, not releasing) voice on a MIDI channel, nullptr if none
+    const PaulaVoice* channelVoice(uint8_t midiChannel) const;
 
 private:
     struct ChannelState {
@@ -135,6 +139,18 @@ private:
         uint8_t fxNumber = 0, fxHigh = 0;
         uint8_t pendingCmd = 0, pendingParam = 0;
         int pendingTicks = 0;         // effect command waiting for a note on the same row (ticks left)
+        double tickCounter = 0.0;     // effect tick clock, restarted by notes and effect commands (a new row)
+        int silentKey = -1;           // note at this instant that found no sample; a program change may follow
+        uint8_t silentVelocity = 0;
+
+        // Effect memory, per channel as in ProTracker, so a new note keeps it
+        uint8_t portaSpeed = 0;       // 3xx
+        uint8_t vibratoCmd = 0;       // 4xy
+        uint8_t tremoloCmd = 0;       // 7xy
+        uint8_t vibratoWave = 0;      // E4x
+        uint8_t tremoloWave = 0;      // E7x
+        bool glissando = false;       // E3x
+        uint8_t offsetMemory = 0;     // 9xx
     };
 
     const Module* activeModule = nullptr;
@@ -160,14 +176,14 @@ private:
     std::array<uint8_t, 16> channelProgram{}; // sample slot chosen by MIDI program change, 0 = use selectedSlot
     uint32_t globalAge = 0;
     double samplesPerTick = 918.75;
-    double tickCounter = 0.0;
 
     std::array<float, 4> scopeOutputs{0.0f, 0.0f, 0.0f, 0.0f};
 
     int allocateVoiceSlot();
     double keyToPeriod(int key, int8_t finetune) const;
     void updateTickLength();
-    void tick();
+    void tick(uint8_t midiChannel);
+    void restartTickClock(ChannelState& ch);
     void applyTickEffects(ActiveVoiceSlot& slot);
     void startEffectOnVoice(ActiveVoiceSlot& slot, uint8_t cmd, uint8_t param, bool atStart);
     void release(ActiveVoiceSlot& slot);

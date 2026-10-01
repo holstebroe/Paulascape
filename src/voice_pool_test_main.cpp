@@ -198,7 +198,7 @@ void testPitch() {
     assert(base == 214);
     t.pool.setPitchBendValue(0, 16383);
     assert(t.pool.voicePeriod(t.firstVoice()) == 214);
-    t.run(1000);
+    t.run(2000); // the first tick comes 1.5 ticks after the note (about 1380 samples at 120 BPM)
     assert(t.pool.voicePeriod(t.firstVoice()) < 200);
 
     // Notes outside the table extend by octaves

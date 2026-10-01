@@ -32,12 +32,17 @@ public:
     uint16_t getPeriod() const { return currentPeriod; }
     uint8_t getVolume() const { return currentVolume; }
     const ModSample* getSample() const { return activeSample; }
+    // Introspection (tests): how often trigger() was called, and the offset of the last trigger
+    uint32_t getTriggerCount() const { return triggerCount; }
+    uint32_t getStartOffset() const { return lastStartOffset; }
 
     float renderSample();
 
 private:
     bool active = false;
     const ModSample* activeSample = nullptr;
+    uint32_t triggerCount = 0;
+    uint32_t lastStartOffset = 0;
 
     uint16_t currentPeriod = 214;
     uint8_t currentVolume = 64;
