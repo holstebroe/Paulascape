@@ -107,7 +107,8 @@ public:
     void setParamFromGui(clap_id paramId, double value);
     bool loadModFile(const std::string& path);
     bool loadModMemory(const uint8_t* data, size_t size);
-    bool importWavToSlot(uint8_t slot, const std::string& path);
+    // Imports WAV, IFF 8SVX, Scream Tracker samples or headerless raw 8-bit data (signed/unsigned auto-detected).
+    bool importWavToSlot(uint8_t slot, const std::string& path, std::string* formatOut = nullptr);
     void selectSlot(uint8_t slot);
     void adjustSlot(uint8_t slot, SlotField field, int delta);
     bool exportMidi(const std::string& path, int patternIndex);   // full note export, -1 = whole song

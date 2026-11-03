@@ -9,9 +9,10 @@
 namespace paulascape {
 
 static std::string winDialog(bool save, const std::string& title, const std::string& defaultName, const std::string& filterName, const std::string& filterExt) {
-    std::string filter = filterName + " (*." + filterExt + ")";
+    const std::string pattern = filterExt == "*" ? "*.*" : "*." + filterExt;
+    std::string filter = filterName + " (" + pattern + ")";
     filter.push_back('\0');
-    filter += "*." + filterExt;
+    filter += pattern;
     filter.push_back('\0');
     filter += "All files";
     filter.push_back('\0');
@@ -89,8 +90,8 @@ std::string saveFileDialog(const std::string& title, const std::string& defaultN
 // Linux: use zenity, then kdialog, whichever is installed.
 std::string openFileDialog(const std::string& title, const std::string& filterName, const std::string& filterExt) {
     std::string r = runCommand("zenity --file-selection --title=" + shellQuote(title) +
-                               " --file-filter=" + shellQuote(filterName + " | *." + filterExt + " *." + filterExt) + " 2>/dev/null");
-    if (r.empty()) r = runCommand("kdialog --getopenfilename . " + shellQuote("*." + filterExt) + " 2>/dev/null");
+                               " --file-filter=" + shellQuote(filterName + " | " + (filterExt == "*" ? "*" : "*." + filterExt)) + " 2>/dev/null");
+    if (r.empty()) r = runCommand("kdialog --getopenfilename . " + shellQuote(filterExt == "*" ? "*" : "*." + filterExt) + " 2>/dev/null");
     return r;
 }
 

@@ -49,6 +49,7 @@ and most design features are stubs. Legend: [x] done, [~] partial, [ ] missing.
 - [ ] **L. Known gaps to decide:** velocity maps to Cxx volume as in the design, so the slot "Vol" column only affects pattern mode; layout is not asked on first open; macOS GUI; keyboard input; undo of slot edits; `request_resize` is called from the GUI thread
 
 ## Progress log
+- 2026-11-03: sample import beyond WAV: IFF 8SVX, Scream Tracker sample files and headerless raw 8-bit (signed/unsigned auto-detected); import dialog and drop accept any file.
 - 2026-09-30: audit, plan rewritten, `deploy_clap` target added.
 - 2026-09-30: milestones A-D implemented: plugin state/API rewrite, UI, X11/Win32 windows, `clap.gui`. Tests now keep `assert` in Release (they were no-ops). New tests use `test/mods/BEDROCK.MOD`; `gui_window_x11_test_xvfb` runs under Xvfb. Replaced the stub font with pt2-clone's real one.
 - 2026-09-30: milestone G done (full replayer, tests).

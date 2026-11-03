@@ -1,13 +1,11 @@
 #include "wav_import.hpp"
+#include "sample_import.hpp"
 #include <fstream>
 #include <cstring>
 #include <cmath>
 #include <algorithm>
 
 namespace paulascape {
-
-constexpr size_t MAX_AMIGA_SAMPLE_BYTES = 131070; // 128 KB - 2 bytes limit
-constexpr double AMIGA_PAL_C3_FREQ = 16574.0;     // Target sample rate
 
 static uint16_t readLE16(const uint8_t* p) {
     return static_cast<uint16_t>(p[0]) | (static_cast<uint16_t>(p[1]) << 8);
@@ -112,80 +110,15 @@ bool WavImporter::importWav(const uint8_t* data, size_t size, ModSample& outSamp
         monoFloat[i] = frameSum / static_cast<float>(numChannels);
     }
 
-    // Resample to 16,574 Hz
-    double resampleRatio = AMIGA_PAL_C3_FREQ / static_cast<double>(sampleRate);
-    size_t targetLength = static_cast<size_t>(numSamples * resampleRatio);
-
-    if (targetLength > MAX_AMIGA_SAMPLE_BYTES) {
-        targetLength = MAX_AMIGA_SAMPLE_BYTES;
-    }
-
-    // Ensure even length for ProTracker
-    if (targetLength & 1) targetLength--;
-    if (targetLength == 0) return false;
-
-    std::vector<int8_t> pcm8(targetLength, 0);
-
-    // Peak find for normalization
-    float maxPeak = 0.0f;
-    for (size_t i = 0; i < targetLength; ++i) {
-        double srcPos = i / resampleRatio;
-        size_t idx1 = static_cast<size_t>(srcPos);
-        size_t idx2 = std::min(idx1 + 1, numSamples - 1);
-        float frac = static_cast<float>(srcPos - idx1);
-
-        float interp = monoFloat[idx1] + frac * (monoFloat[idx2] - monoFloat[idx1]);
-        if (std::abs(interp) > maxPeak) maxPeak = std::abs(interp);
-    }
-
-    float normFactor = (maxPeak > 1e-4f) ? (1.0f / maxPeak) : 1.0f;
-
-    for (size_t i = 0; i < targetLength; ++i) {
-        double srcPos = i / resampleRatio;
-        size_t idx1 = static_cast<size_t>(srcPos);
-        size_t idx2 = std::min(idx1 + 1, numSamples - 1);
-        float frac = static_cast<float>(srcPos - idx1);
-
-        float interp = monoFloat[idx1] + frac * (monoFloat[idx2] - monoFloat[idx1]);
-        float scaled = std::clamp(interp * normFactor * 127.0f, -128.0f, 127.0f);
-        pcm8[i] = static_cast<int8_t>(scaled);
-    }
-
-    // Fade out end of crop
-    if (targetLength >= 16) {
-        for (size_t i = 0; i < 16; ++i) {
-            size_t idx = targetLength - 16 + i;
-            float fade = 1.0f - (i / 16.0f);
-            pcm8[idx] = static_cast<int8_t>(pcm8[idx] * fade);
-        }
-    }
-
-    outSample.header.length = static_cast<uint32_t>(targetLength);
-    outSample.header.volume = 64;
-    outSample.header.finetune = 0;
-    outSample.header.loopStart = 0;
-    outSample.header.loopLength = 2;
-    outSample.header.loopEnabled = false;
-
-    // Parse smpl chunk if present
+    int64_t loopStart = -1, loopEnd = -1;
     if (smplChunk) {
         uint32_t numLoops = readLE32(smplChunk + 28);
         if (numLoops > 0) {
-            uint32_t lStart = readLE32(smplChunk + 36 + 8);
-            uint32_t lEnd = readLE32(smplChunk + 36 + 12);
-            uint32_t resampleStart = static_cast<uint32_t>(lStart * resampleRatio);
-            uint32_t resampleEnd = static_cast<uint32_t>(lEnd * resampleRatio);
-
-            if (resampleEnd > resampleStart + 2 && resampleEnd <= targetLength) {
-                outSample.header.loopStart = resampleStart & ~1U; // Even byte alignment
-                outSample.header.loopLength = (resampleEnd - resampleStart) & ~1U;
-                outSample.header.loopEnabled = true;
-            }
+            loopStart = readLE32(smplChunk + 36 + 8);
+            loopEnd = readLE32(smplChunk + 36 + 12);
         }
     }
-
-    outSample.pcmData = std::move(pcm8);
-    return true;
+    return convertToAmiga(monoFloat, sampleRate, loopStart, loopEnd, outSample);
 }
 
 } // namespace paulascape

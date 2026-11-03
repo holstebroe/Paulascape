@@ -127,10 +127,16 @@ void UiApp::loadModDialog() {
 }
 
 void UiApp::importWavDialog() {
-    const std::string path = openFileDialog("Import WAV into selected slot", "WAV audio", "wav");
+    const std::string path = openFileDialog("Import sample into selected slot", "Sample files", "*");
     if (path.empty()) return;
-    status = plugin.importWavToSlot(snap.selectedSlot, path) ? "Imported WAV into slot " + std::to_string(snap.selectedSlot)
-                                                              : "Could not import WAV";
+    importSampleFile(snap.selectedSlot, path);
+}
+
+void UiApp::importSampleFile(int slot, const std::string& path) {
+    std::string fmt;
+    status = plugin.importWavToSlot(static_cast<uint8_t>(slot), path, &fmt)
+                 ? "Imported " + fmt + " into slot " + std::to_string(slot)
+                 : (fmt.empty() ? std::string("Could not import sample") : "Could not import: " + fmt);
 }
 
 void UiApp::exportMidiDialog(bool notes) {
@@ -409,7 +415,7 @@ void UiApp::drawWavePanel(Framebuffer& fb) {
     if (sv.length > 0 && snap.waveMin.size() >= static_cast<size_t>(w)) drawWave(fb, sv, x0, top, areaH, w);
 
     button(fb, x0 + w - 22, y0 + h - 18, 20, 16, "", false, [this](int, bool) { importWavDialog(); },
-           "Import a WAV file into the selected slot (or drop one on a row)");
+           "Import a sample (WAV, IFF 8SVX, S3M or raw 8-bit) into the selected slot, or drop one on a row");
     floppy(fb, x0 + w - 16, y0 + h - 14, COL_TEXT);
 }
 
@@ -562,14 +568,13 @@ void UiApp::onFileDropped(int x, int y, const std::string& path) {
     if (ends(".mod")) {
         status = plugin.loadModFile(path) ? "Loaded MOD" : "Could not load MOD";
         scroll = 0;
-    } else if (ends(".wav") && screen == Screen::Front && snap.params[PARAM_PLAYBACK_MODE] < 0.5) {
+    } else if (screen == Screen::Front && snap.params[PARAM_PLAYBACK_MODE] < 0.5) {
         int slot = snap.selectedSlot;
         if (y >= MATRIX_Y && y < MATRIX_Y + ROW_H * visibleRows()) slot = scroll + (y - MATRIX_Y) / ROW_H + 1;
         (void)x;
         if (slot >= 1 && slot <= 31) {
             plugin.selectSlot(static_cast<uint8_t>(slot));
-            status = plugin.importWavToSlot(static_cast<uint8_t>(slot), path) ? "Imported WAV into slot " + std::to_string(slot)
-                                                                               : "Could not import WAV";
+            importSampleFile(slot, path);
         }
     }
 }

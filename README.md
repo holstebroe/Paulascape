@@ -8,7 +8,7 @@ Paulascape is an MIT-licensed CLAP instrument plugin that loads a ProTracker MOD
 - **Playback modes:** single, multi-channel and drum instrument modes on a 32-voice pool with Amiga round-robin channels (stereo L R R L with adjustable separation, or four mono outputs), and pattern mode (C1 = pattern 0, C0 = whole song, looped while the key is held).
 - **MIDI control:** velocity, pitch bend, mod wheel vibrato, channel pressure tremolo, CC 68 legato, CC 5 glide, CC 70-74 sample offset / retrigger / note cut / LED filter, CC 20-22 effect commands. All CC numbers can be changed.
 - **Full ProTracker replayer** for pattern mode (all effects except EFx funk repeat), tempo scaled to the host.
-- **WAV import** into any slot, converted to Amiga quality (16,574 Hz, 8-bit, cropped to 128 KB).
+- **Sample import** into any slot, converted to Amiga quality (16,574 Hz, 8-bit, cropped to 128 KB). Reads WAV, IFF 8SVX (incl. Fibonacci-packed), Scream Tracker 3 sample files (`.SMP`, `.879` and the like) and headerless raw 8-bit data (`.RAW`, `.PCM`, `.SAM`...). The format is detected from the content, and raw files are checked for signed vs unsigned (rate assumed 8363 Hz). Scream Tracker `.ST3` cache files are rejected.
 - **MIDI export:** a pattern-mode clip, or a note-by-note export (four tracks, tempo map, program changes, effect-command CCs) that plays back through the plugin.
 - **ProTracker-style GUI** drawn into a software framebuffer with pt2-clone's font: front page with sample matrix and live channel scopes, settings page, MIDI mapping page. X11 and Win32 windows; macOS has no GUI yet.
 
