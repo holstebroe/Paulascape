@@ -26,6 +26,7 @@ set(PAULASCAPE_CORE_SOURCES
     src/core/voice_pool.cpp
     src/core/replayer.cpp
     src/import/wav_import.cpp
+    src/import/sample_import.cpp
     src/export/midi_export.cpp
     src/export/song_unroll.cpp
     src/clap/paulascape_plugin.cpp
@@ -97,6 +98,8 @@ add_paulascape_test(voice_pool_test src/voice_pool_test_main.cpp)
 add_paulascape_test(replayer_test src/replayer_test_main.cpp)
 target_compile_definitions(replayer_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(wav_import_test src/import/wav_import_test_main.cpp)
+add_paulascape_test(sample_import_test src/import/sample_import_test_main.cpp)
+target_compile_definitions(sample_import_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(midi_export_test src/export/midi_export_test_main.cpp)
 target_compile_definitions(midi_export_test PRIVATE PAULASCAPE_TEST_DIR="${CMAKE_CURRENT_SOURCE_DIR}/test")
 add_paulascape_test(midi_roundtrip_test src/export/midi_roundtrip_test_main.cpp)

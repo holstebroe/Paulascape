@@ -2,6 +2,7 @@
 #include "core/module_io.hpp"
 #include "export/midi_export.hpp"
 #include "import/wav_import.hpp"
+#include "import/sample_import.hpp"
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -615,10 +616,10 @@ bool PaulascapePlugin::loadModFile(const std::string& path) {
     return true;
 }
 
-bool PaulascapePlugin::importWavToSlot(uint8_t slot, const std::string& path) {
+bool PaulascapePlugin::importWavToSlot(uint8_t slot, const std::string& path, std::string* formatOut) {
     if (slot < 1 || slot > 31) return false;
     ModSample imported;
-    if (!WavImporter::importWavFile(path, imported)) return false;
+    if (!SampleImporter::importFile(path, imported, formatOut)) return false;
     std::lock_guard<std::mutex> lock(stateMutex);
     stopAllAudio();
     ModSampleHeader& dst = currentModule.samples[slot].header;
@@ -626,7 +627,7 @@ bool PaulascapePlugin::importWavToSlot(uint8_t slot, const std::string& path) {
     std::string name = path.substr(path.find_last_of("/\\") == std::string::npos ? 0 : path.find_last_of("/\\") + 1);
     if (const auto dot = name.find_last_of('.'); dot != std::string::npos && dot > 0) name.resize(dot);
     name.resize(std::min<size_t>(name.size(), 22)); // MOD sample names hold 22 characters
-    imported.header.name = name;
+    if (imported.header.name.empty()) imported.header.name = name; // 8SVX/S3M carry their own name
     imported.header.legato = dst.legato;
     imported.header.inKey = dst.inKey;
     imported.header.outKey = dst.outKey;

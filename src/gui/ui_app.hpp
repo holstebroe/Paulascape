@@ -82,6 +82,7 @@ private:
     void clampScroll();
     void loadModDialog();
     void importWavDialog();
+    void importSampleFile(int slot, const std::string& path);
     void exportMidiDialog(bool notes);
     void cycleParam(clap_id id, int button, bool shift);
 };
