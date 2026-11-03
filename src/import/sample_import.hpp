@@ -24,7 +24,7 @@ public:
 };
 
 // Shared tail of every importer: mono float samples at `sampleRate` -> peak-normalised 8-bit at 16,574 Hz, cropped to
-// 128 KB, end faded. Loop points are in source frames (loopEnd exclusive); pass -1 for no loop.
+// 128 KB, DC offset removed, ends faded. Loop points are in source frames (loopEnd exclusive); pass -1 for no loop.
 bool convertToAmiga(const std::vector<float>& monoFloat, double sampleRate, int64_t loopStart, int64_t loopEnd,
                     ModSample& outSample);
 

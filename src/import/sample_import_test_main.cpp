@@ -46,6 +46,20 @@ int main() {
     assert(SampleImporter::importSample(un.data(), un.size(), b, &fmt) && fmt == "raw unsigned 8-bit");
     assert(a.pcmData == b.pcmData);
 
+    // The +20 offset above must be gone: an Amiga-style high-pass would turn it into a tail after the sample.
+    double mean = 0;
+    for (int8_t v : a.pcmData) mean += v;
+    mean /= static_cast<double>(a.pcmData.size());
+    assert(std::fabs(mean) < 1.0);
+
+    // A real bass sample with a DC offset in the file (AGEBASS: mean -1.7 in 8-bit)
+    ModSample bass;
+    assert(load("AGEBASS.SMP", bass, fmt));
+    mean = 0;
+    for (int8_t v : bass.pcmData) mean += v;
+    assert(std::fabs(mean / static_cast<double>(bass.pcmData.size())) < 0.1);
+    assert(bass.pcmData.back() == 0);
+
     std::cout << "Sample importer test passed\n";
     return 0;
 }

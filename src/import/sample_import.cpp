@@ -172,10 +172,20 @@ bool rawLooksUnsigned(const uint8_t* d, size_t n) {
 
 } // namespace
 
-bool convertToAmiga(const std::vector<float>& monoFloat, double sampleRate, int64_t loopStart, int64_t loopEnd,
+bool convertToAmiga(const std::vector<float>& rawMono, double sampleRate, int64_t loopStart, int64_t loopEnd,
                     ModSample& outSample) {
-    const size_t numSamples = monoFloat.size();
+    const size_t numSamples = rawMono.size();
     if (numSamples == 0 || sampleRate <= 0.0) return false;
+
+    // Remove the DC offset. Amiga output is high-pass filtered, so a sample with an offset makes a decaying
+    // "tail" of the opposite sign when it stops (and clicks at note edges).
+    std::vector<float> monoFloat = rawMono;
+    {
+        double sum = 0.0;
+        for (float v : monoFloat) sum += v;
+        const float mean = static_cast<float>(sum / static_cast<double>(numSamples));
+        for (float& v : monoFloat) v -= mean;
+    }
     // Resample to 16,574 Hz
     double resampleRatio = AMIGA_PAL_C3_FREQ / sampleRate;
     size_t targetLength = static_cast<size_t>(numSamples * resampleRatio);
@@ -213,6 +223,11 @@ bool convertToAmiga(const std::vector<float>& monoFloat, double sampleRate, int6
         float interp = monoFloat[idx1] + frac * (monoFloat[idx2] - monoFloat[idx1]);
         float scaled = std::clamp(interp * normFactor * 127.0f, -128.0f, 127.0f);
         pcm8[i] = static_cast<int8_t>(scaled);
+    }
+
+    // Fade in when the sample starts away from zero (looped-from-start samples keep their first value)
+    if (targetLength >= 32 && std::abs(pcm8[0]) > 2 && !(loopStart == 0 && loopEnd > 0)) {
+        for (size_t i = 0; i < 16; ++i) pcm8[i] = static_cast<int8_t>(pcm8[i] * (i / 16.0f));
     }
 
     // Fade out end of crop
